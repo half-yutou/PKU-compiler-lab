@@ -1,10 +1,11 @@
 [package]
 name = "pku-compiler"
 version = "0.1.0"
-edition = "2024"
+edition = "2021" # 2021 edition is required for lalrpop(记得删Cargo.lock,不然docker里编译不过)
 
 [build-dependencies]
-lalrpop = "0.19.7"
+lalrpop = "0.22.2"
 
 [dependencies]
-lalrpop-util = {version = "0.19.7", features = ["lexer"]}
+lalrpop-util = {version = "0.22.2", features = ["lexer"]}
+koopa = "0.0.8"

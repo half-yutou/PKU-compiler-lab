@@ -1,5 +1,6 @@
 # Rust 编译产物
 /target/
+Cargo.lock
 
 # 这些是由其他工具生成的文件
 **/*.rs.bk
@@ -72,3 +73,6 @@ perf.data*
 
 # 基准测试结果
 /benches/target/
+
+# ai文档集
+/aidoc/
