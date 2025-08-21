@@ -1,6 +1,6 @@
 // lalrpop 里的约定
 grammar;
-use pku_compiler::*;
+use pku_compiler::ast::*;
 
 // 约束 lexer 的行为
 match {
@@ -24,14 +24,32 @@ FuncType: FuncType = "int" => FuncType::Int;
 
 Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
 
-Stmt: Stmt = "return" <num: Number> ";" => Stmt { <> };
+Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
+
+Exp: Exp = <unary_exp: UnaryExp> => Exp::Unary(unary_exp);
+
+UnaryExp: UnaryExp = {
+    <primary_exp: PrimaryExp> => UnaryExp::Primary(primary_exp),
+    <unary_op: UnaryOp> <unary_exp: UnaryExp> => UnaryExp::Unary(unary_op, Box::new(unary_exp)),
+}
+
+UnaryOp: UnaryOp = {
+    "+" => UnaryOp::Plus,
+    "-" => UnaryOp::Minus,
+    "!" => UnaryOp::Not,
+}
+
+PrimaryExp: PrimaryExp = {
+    <num: Number> => PrimaryExp::Number(num),
+    "(" <exp: Exp> ")" => PrimaryExp::Paren(Box::new(exp)),
+}
+
 
 Number: i32 = <num: IntConst> => <>;
 
 
 // 如果匹配到标识符, 就返回这个字符串
 // 一对尖括号在此处指代的是正则表达式匹配到的字符串 (&str)
-// 关于尖括号到底代表什么, 请 RTFM
 Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 
 // 对整数字面量的处理方式: 把匹配到的字符串按对应进制转换成数字

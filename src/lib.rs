@@ -1,31 +1,4 @@
-use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
-
+pub mod ast;
 pub mod lab1;
 pub mod lab2;
-
-#[derive(Debug)]
-pub struct CompUnit {
-    pub func_def: FuncDef,
-}
-
-#[derive(Debug)]
-pub struct FuncDef {
-    pub func_type: FuncType,
-    pub id: String,
-    pub block: Block,
-}
-
-#[derive(Debug)]
-pub enum FuncType {
-    Int
-}
-
-#[derive(Debug)]
-pub struct Block {
-    pub stmt: Stmt,
-}
-
-#[derive(Debug)]
-pub struct Stmt {
-    pub num: i32,
-}
+pub mod lab3;
