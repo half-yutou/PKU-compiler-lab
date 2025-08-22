@@ -8,7 +8,7 @@ pub fn generate_riskv_assembly(program: Program) -> String {
     let mut asm = String::new();
     asm.push_str(".text\n");
     
-    // 遍历所有函数
+    // 遍历所有函数(为了顺序遍历，必须遍历layout而非funcs)
     for &func_handle in program.func_layout() {
         let func_data = program.func(func_handle);
         asm.push_str(&func_data.gen_assembly());
