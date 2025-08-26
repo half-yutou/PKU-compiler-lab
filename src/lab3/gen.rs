@@ -1,6 +1,6 @@
 use koopa::ir::{BinaryOp, FunctionData, Program, Type, Value};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
-use crate::ast::{CompUnit, Exp, UnaryExp, PrimaryExp, UnaryOp};
+use crate::ast::{CompUnit, Exp, UnaryExp, PrimaryExp, UnaryOp, AddExp, MulExp, MulDivOp, PlusSubOp};
 
 pub fn generate_koopa_ir(ast: CompUnit) -> Program {
     let mut program = Program::new();
@@ -25,8 +25,56 @@ pub fn generate_koopa_ir(ast: CompUnit) -> Program {
 // 生成表达式的 Koopa IR
 fn generate_exp(exp: &Exp, func_data: &mut FunctionData) -> Value {
     match exp {
-        Exp::Unary(unary_exp) => generate_unary_exp(unary_exp, func_data),
+        Exp::AddExp(add_exp) => generate_add_exp(add_exp, func_data),
     }
+}
+
+// 生成加法表达式的 Koopa IR(后序遍历，先处理左右节点，再处理中间节点)
+fn generate_add_exp(add_exp: &AddExp, func_data: &mut FunctionData) -> Value {
+    match add_exp {
+        AddExp::Mul(mul_exp) => generate_mul_exp(mul_exp, func_data),
+        AddExp::AddMul(left, op, right) => {
+            let left_value = generate_add_exp(left, func_data);
+            let right_value = generate_mul_exp(right, func_data);
+            generate_add_binary_op(op, left_value, right_value, func_data)
+        }
+    }
+}
+
+// 生成乘法表达式的 Koopa IR(后续遍历， 先处理左右节点，再处理中间节点)
+fn generate_mul_exp(mul_exp: &MulExp, func_data: &mut FunctionData) -> Value {
+    match mul_exp {
+        MulExp::Unary(unary_exp) => generate_unary_exp(unary_exp, func_data),
+        MulExp::MulDiv(left, op, right) => {
+            let left_value = generate_mul_exp(left, func_data);
+            let right_value = generate_unary_exp(right, func_data);
+            generate_mul_binary_op(op, left_value, right_value, func_data)
+        }
+    }
+}
+
+fn generate_add_binary_op(op: &PlusSubOp, left: Value, right: Value, func_data: &mut FunctionData) -> Value {
+    let binary_op = match op {
+        PlusSubOp::Plus => BinaryOp::Add,
+        PlusSubOp::Minus => BinaryOp::Sub,
+    };
+
+    let inst = func_data.dfg_mut().new_value().binary(binary_op, left, right);
+    let entry = func_data.layout().entry_bb().unwrap();
+    func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(inst).unwrap();
+    inst
+}
+
+fn generate_mul_binary_op(op: &MulDivOp, left: Value, right: Value, func_data: &mut FunctionData) -> Value {
+    let binary_op = match op {
+        MulDivOp::Mul => BinaryOp::Mul,
+        MulDivOp::Div => BinaryOp::Div,
+    };
+
+    let inst = func_data.dfg_mut().new_value().binary(binary_op, left, right);
+    let entry = func_data.layout().entry_bb().unwrap();
+    func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(inst).unwrap();
+    inst
 }
 
 // 生成一元表达式的 Koopa IR
