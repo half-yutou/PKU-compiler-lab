@@ -26,6 +26,7 @@ pub fn generate_riscv_assembly(program: Program) -> String {
 struct AssemblyGenerator {
     value_map: HashMap<Value, String>, // Value -> 寄存器映射
     temp_counter: usize,               // 临时寄存器计数器
+    free_regs: Vec<String>,           // 可重用的寄存器池
 }
 
 impl AssemblyGenerator {
@@ -33,6 +34,7 @@ impl AssemblyGenerator {
         Self {
             value_map: HashMap::new(),
             temp_counter: 0,
+            free_regs: Vec::new(),
         }
     }
 
@@ -54,12 +56,13 @@ impl AssemblyGenerator {
     fn gen_instruction(&mut self, value: Value, value_data: &ValueData, dfg: &DataFlowGraph) -> String {
         match value_data.kind() {
             ValueKind::Integer(i) => {
-                // 如果是非零立即数且还没有生成过 li 指令
+                // 总是为非零立即数生成li指令，确保寄存器中有正确的值
                 if i.value() != 0 {
                     let reg = self.get_value_reg(value, dfg);
                     format!("  li    {}, {}\n", reg, i.value())
                 } else {
-                    String::new() // 零值不需要生成指令
+                    // 零值也需要确保在需要时能正确处理
+                    String::new()
                 }
             },
             
@@ -90,37 +93,117 @@ impl AssemblyGenerator {
                 self.value_map.insert(value, result_reg.clone());
                 
                 match binary.op() {
-                    BinaryOp::Eq => {
-                        asm.push_str(&format!("  xor   {}, {}, {}\n  seqz  {}, {}\n", 
-                                       result_reg, lhs_reg, rhs_reg, result_reg, result_reg));
+                    // 算术运算
+                    BinaryOp::Add => {
+                        asm.push_str(&format!("  add   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
                     },
                     BinaryOp::Sub => {
                         asm.push_str(&format!("  sub   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
                     },
-                    _ => {}, // 其他运算符暂不实现
+                    BinaryOp::Mul => {
+                        asm.push_str(&format!("  mul   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
+                    },
+                    BinaryOp::Div => {
+                        asm.push_str(&format!("  div   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
+                    },
+                    BinaryOp::Mod => {
+                        asm.push_str(&format!("  rem   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
+                    },
+                    
+                    // 比较运算 - 使用真实的RISC-V指令
+                    BinaryOp::Eq => {
+                        asm.push_str(&format!("  xor   {}, {}, {}\n  seqz  {}, {}\n", 
+                                       result_reg, lhs_reg, rhs_reg, result_reg, result_reg));
+                    },
+                    BinaryOp::NotEq => {
+                        asm.push_str(&format!("  xor   {}, {}, {}\n  snez  {}, {}\n", 
+                                       result_reg, lhs_reg, rhs_reg, result_reg, result_reg));
+                    },
+                    BinaryOp::Lt => {
+                        // a < b：直接使用slt指令
+                        asm.push_str(&format!("  slt   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
+                    },
+                    BinaryOp::Le => {
+                        // a <= b 等价于 !(a > b) 等价于 !(b < a)
+                        asm.push_str(&format!("  slt   {}, {}, {}\n  seqz  {}, {}\n", 
+                                       result_reg, rhs_reg, lhs_reg, result_reg, result_reg));
+                    },
+                    BinaryOp::Gt => {
+                        // a > b 等价于 b < a
+                        asm.push_str(&format!("  slt   {}, {}, {}\n", result_reg, rhs_reg, lhs_reg));
+                    },
+                    BinaryOp::Ge => {
+                        // a >= b 等价于 !(a < b)
+                        asm.push_str(&format!("  slt   {}, {}, {}\n  seqz  {}, {}\n", 
+                                       result_reg, lhs_reg, rhs_reg, result_reg, result_reg));
+                    },
+                    
+                    // 位运算（用于逻辑运算）
+                    BinaryOp::And => {
+                        asm.push_str(&format!("  and   {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
+                    },
+                    BinaryOp::Or => {
+                        asm.push_str(&format!("  or    {}, {}, {}\n", result_reg, lhs_reg, rhs_reg));
+                    },
+                    
+                    _ => {
+                        panic!("Unsupported binary operation: {:?}", binary.op());
+                    }
                 }
+                
+                // 释放操作数寄存器（如果它们是临时计算结果）
+                self.maybe_free_operand(binary.lhs(), dfg);
+                self.maybe_free_operand(binary.rhs(), dfg);
                 
                 asm
             },
             
             ValueKind::Return(ret) => {
                 if let Some(ret_val) = ret.value() {
+                    let mut asm = String::new();
+                    let value_data = dfg.value(ret_val);
+                    
+                    // 确保返回值已经正确处理（生成必要的指令）
+                    if let ValueKind::Integer(i) = value_data.kind() {
+                        if i.value() != 0 && !self.value_map.contains_key(&ret_val) {
+                            asm.push_str(&self.gen_instruction(ret_val, value_data, dfg));
+                        }
+                    }
+                    
                     let ret_reg = self.get_value_reg(ret_val, dfg);
-                    format!("  mv    a0, {}\n  ret\n", ret_reg)
+                    asm.push_str(&format!("  mv    a0, {}\n  ret\n", ret_reg));
+                    asm
                 } else {
                     "  ret\n".to_string()
                 }
-            },
+            }
 
             _ => String::new(), // 其他指令类型暂不处理
         }
     }
 
-    // 分配临时寄存器t0-t6
+    // 分配临时寄存器，支持寄存器重用
     fn alloc_temp_reg(&mut self) -> String {
-        let reg = format!("t{}", self.temp_counter);
-        self.temp_counter += 1;
-        reg
+        // 优先使用释放的寄存器
+        if let Some(reg) = self.free_regs.pop() {
+            return reg;
+        }
+        
+        // 可用寄存器：t0-t6, a1-a7 (a0用于返回值)
+        let available_regs = [
+            "t0", "t1", "t2", "t3", "t4", "t5", "t6",
+            "a1", "a2", "a3", "a4", "a5", "a6", "a7"
+        ];
+        
+        if self.temp_counter >= available_regs.len() {
+            // 如果寄存器不够，强制重用最早的寄存器
+            let reg_idx = self.temp_counter % available_regs.len();
+            available_regs[reg_idx].to_string()
+        } else {
+            let reg = available_regs[self.temp_counter].to_string();
+            self.temp_counter += 1;
+            reg
+        }
     }
 
     fn get_value_reg(&mut self, value: Value, dfg: &DataFlowGraph) -> String {
@@ -143,6 +226,25 @@ impl AssemblyGenerator {
                     panic!("Unhandled value type in get_value_reg");
                 }
             }
+        }
+    }
+    
+    // 尝试释放操作数寄存器
+    fn maybe_free_operand(&mut self, value: Value, dfg: &DataFlowGraph) {
+        let value_data = dfg.value(value);
+        match value_data.kind() {
+            ValueKind::Integer(_) => {
+                // 立即数不需要释放寄存器，因为可以重新生成 li 指令
+            },
+            ValueKind::Binary(_) => {
+                // 二元运算的结果可以释放
+                if let Some(reg) = self.value_map.remove(&value) {
+                    if reg != "x0" && reg != "a0" {
+                        self.free_regs.push(reg);
+                    }
+                }
+            },
+            _ => {}
         }
     }
 }
