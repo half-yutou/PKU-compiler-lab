@@ -29,16 +29,42 @@ pub struct Stmt {
 // region 表达式
 /// ```text
 /// Exp (最低优先级)
-/// └── AddExp
-///     └── MulExp
-///         └── UnaryExp
-///             └── PrimaryExp (最高优先级)
-///                 ├── Number
-///                 └── Paren(Exp) ← 括号在这里重新开始
+/// └── LOrExp      (逻辑或 ||)
+///     └── LAndExp  (逻辑与 &&)
+///         └── EqExp    (相等比较 == !=)
+///             └── RelExp   (关系比较 < > <= >=)
+///                 └── AddExp   (加减 + -)
+///                     └── MulExp   (乘除模 * / %)
+///                         └── UnaryExp (一元运算 + - !)
+///                             └── PrimaryExp (最高优先级)
 /// ```
 #[derive(Debug)]
 pub enum Exp {
-    AddExp(AddExp),
+    LOr(Box<LOrExp>),
+}
+
+#[derive(Debug)]
+pub enum RelExp {
+    Add(Box<AddExp>),
+    Rel(Box<RelExp>, RelOp, Box<AddExp>),
+}
+
+#[derive(Debug)]
+pub enum EqExp {
+    Rel(Box<RelExp>), 
+    Eq(Box<EqExp>, EqOp, Box<RelExp>),
+}
+
+#[derive(Debug)]
+pub enum LAndExp {
+    Eq(Box<EqExp>),
+    LAnd(Box<LAndExp>, Box<EqExp>), // 不需要op，因为只有&&
+}
+
+#[derive(Debug)]
+pub enum LOrExp {
+    LAnd(Box<LAndExp>),
+    LOr(Box<LOrExp>, Box<LAndExp>), // 不需要op，因为只有||
 }
 
 #[derive(Debug)]
@@ -82,6 +108,27 @@ pub enum PlusSubOp {
 pub enum MulDivOp {
     Mul, // *
     Div, // /
+    Mod, // %
+}
+
+#[derive(Debug)]
+pub enum RelOp {
+    Lt,  // <
+    Gt,  // >
+    Le,  // <=
+    Ge,  // >=
+}
+
+#[derive(Debug)]
+pub enum EqOp {
+    Eq,  // ==
+    Ne,  // !=
+}
+
+#[derive(Debug)]
+pub enum LogicOp {
+    Or,  // ||
+    And, // &&
 }
 
 // endregion 表达式

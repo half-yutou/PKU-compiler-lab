@@ -8,6 +8,15 @@ match {
   r"\s*" => {},
   r"//[^\n\r]*[\n\r]*" => {},
   r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => {},
+
+//  // 双字符运算符必须在单字符运算符之前匹配
+//  "<=" => LEQ,
+//  ">=" => GEQ,
+//  "==" => EQ,
+//  "!=" => NEQ,
+//  "&&" => LAND,
+//  "||" => LOR,
+
   // 剩下的情况采用默认方式处理
   _
 }
@@ -26,7 +35,27 @@ Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
 
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
 
-Exp: Exp = <add_exp: AddExp> => Exp::AddExp(add_exp);
+Exp: Exp = <lor_exp: LOrExp> => Exp::LOr(Box::new(lor_exp));
+
+LOrExp: LOrExp = {
+    <land_exp: LAndExp> => LOrExp::LAnd(Box::new(land_exp)),
+    <lor_exp: LOrExp> "||" <land_exp: LAndExp> => LOrExp::LOr(Box::new(lor_exp), Box::new(land_exp)),
+}
+
+LAndExp: LAndExp = {
+    <eq_exp: EqExp> => LAndExp::Eq(Box::new(eq_exp)),
+    <land_exp: LAndExp> "&&" <eq_exp: EqExp> => LAndExp::LAnd(Box::new(land_exp), Box::new(eq_exp)),
+}
+
+EqExp: EqExp = {
+    <rel_exp: RelExp> => EqExp::Rel(Box::new(rel_exp)),
+    <eq_exp: EqExp> <eq_op: EqOp> <rel_exp: RelExp> => EqExp::Eq(Box::new(eq_exp), eq_op, Box::new(rel_exp)),
+}
+
+RelExp: RelExp = {
+    <add_exp: AddExp> => RelExp::Add(Box::new(add_exp)),
+    <rel_exp: RelExp> <rel_op: RelOp> <add_exp: AddExp> => RelExp::Rel(Box::new(rel_exp), rel_op, Box::new(add_exp)),
+}
 
 AddExp: AddExp = {
     <mul_exp: MulExp> => AddExp::Mul(Box::new(mul_exp)),
@@ -57,6 +86,19 @@ PlusSubOp: PlusSubOp = {
 MulDivOp: MulDivOp = {
     "*" => MulDivOp::Mul,
     "/" => MulDivOp::Div,
+    "%" => MulDivOp::Mod,
+}
+
+RelOp: RelOp = {
+    "<" => RelOp::Lt,
+    ">" => RelOp::Gt,
+    "<=" => RelOp::Le,
+    ">=" => RelOp::Ge,
+}
+
+EqOp: EqOp = {
+    "==" => EqOp::Eq,
+    "!=" => EqOp::Ne,
 }
 
 PrimaryExp: PrimaryExp = {
