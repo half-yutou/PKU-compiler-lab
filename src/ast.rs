@@ -17,13 +17,47 @@ pub enum FuncType {
 
 #[derive(Debug)]
 pub struct Block {
-    pub stmt: Stmt,
+    pub block_item_list: Vec<BlockItem>,
 }
 
 #[derive(Debug)]
-pub struct Stmt {
-    // 暂时只有一句 return exp ;
-    pub exp: Exp,
+pub enum BlockItem {
+    Decl(Decl),
+    Stmt(Stmt),
+}
+
+#[derive(Debug)]
+pub enum Stmt {
+    Return(Exp),
+    Exp(Option<Exp>),
+    Block(Block),
+}
+
+#[derive(Debug)]
+pub struct ConstDef {
+    pub ident: String,
+    pub const_init_val: ConstInitVal,
+}
+
+#[derive(Debug)]
+pub struct ConstInitVal {
+    pub const_exp: ConstExp,
+}
+
+#[derive(Debug)]
+pub struct ConstExp {
+    pub add_exp: AddExp,
+}
+
+#[derive(Debug)]
+pub enum Decl {
+    Const(ConstDecl),
+}
+
+#[derive(Debug)]
+pub struct ConstDecl {
+    pub b_type: String, 
+    pub const_def_list: Vec<ConstDef>,
 }
 
 // region 表达式
@@ -89,6 +123,7 @@ pub enum UnaryExp {
 pub enum PrimaryExp {
     Number(i32),
     Paren(Box<Exp>),
+    LVal(String), // LVal ::= IDENT,表示对一个标识符(常量名)的引用
 }
 
 #[derive(Debug)]

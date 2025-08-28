@@ -31,9 +31,34 @@ FuncDef: FuncDef = {
 
 FuncType: FuncType = "int" => FuncType::Int;
 
-Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
+Block: Block = "{" <items: BlockItem*> "}" => Block { block_item_list: items };
 
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
+BlockItem: BlockItem = {
+    <decl: Decl> => BlockItem::Decl(decl),
+    <stmt: Stmt> => BlockItem::Stmt(stmt),
+}
+
+Decl: Decl = <const_decl: ConstDecl> => Decl::Const(const_decl);
+
+ConstDecl: ConstDecl = {
+    "const" <b_type: BType> <h: ConstDef> <t: ("," <ConstDef>)*> ";" => {
+        let mut const_def_list = vec![h];
+        for item in t {
+            const_def_list.push(item);
+        }
+        ConstDecl { b_type, const_def_list }
+    }
+};
+
+BType: String = "int" => "int".to_string();
+
+ConstDef: ConstDef = <id:Ident> "=" <const_init_val:ConstInitVal> => ConstDef { ident: id, const_init_val };
+
+ConstInitVal: ConstInitVal = <exp:ConstExp> => ConstInitVal { const_exp: exp };
+
+ConstExp: ConstExp = <exp:AddExp> => ConstExp { add_exp: exp };
+
+Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Return(exp);
 
 Exp: Exp = <lor_exp: LOrExp> => Exp::LOr(Box::new(lor_exp));
 
@@ -104,8 +129,10 @@ EqOp: EqOp = {
 PrimaryExp: PrimaryExp = {
     <num: Number> => PrimaryExp::Number(num),
     "(" <exp: Exp> ")" => PrimaryExp::Paren(Box::new(exp)),
+    <lval: LVal> => PrimaryExp::LVal(lval),
 }
 
+LVal: String = <id:Ident> => id;
 
 Number: i32 = <num: IntConst> => <>;
 

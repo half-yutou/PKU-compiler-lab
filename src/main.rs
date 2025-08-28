@@ -1,6 +1,6 @@
 use koopa::ir::Program;
 use lalrpop_util::lalrpop_mod;
-use pku_compiler::lab3;
+use pku_compiler::{lab3, lab4};
 use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 
     // 调用 lalrpop 生成的 parser 解析输入文件
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
-    let koopa_ir_in_memory = lab3::gen::generate_koopa_ir(ast);
+    let koopa_ir_in_memory = lab4::gen::generate_koopa_ir(ast);
 
     if mode == MODE_KOOPA {
         output_koopa_ir(koopa_ir_in_memory, &output)?;
