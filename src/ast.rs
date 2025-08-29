@@ -31,6 +31,25 @@ pub enum Stmt {
     Return(Exp),
     Exp(Option<Exp>),
     Block(Block),
+    Assign(LVal, Exp) // 赋值语句: LVal = Exp
+}
+#[derive(Debug)]
+pub enum Decl {
+    Const(ConstDecl),
+    Var(VarDecl),
+}
+
+#[derive(Debug)]
+pub struct LVal {
+    pub ident: String,
+}
+
+// region 常量声明
+
+#[derive(Debug)]
+pub struct ConstDecl {
+    pub b_type: String,
+    pub const_def_list: Vec<ConstDef>,
 }
 
 #[derive(Debug)]
@@ -46,19 +65,31 @@ pub struct ConstInitVal {
 
 #[derive(Debug)]
 pub struct ConstExp {
-    pub add_exp: AddExp,
+    pub lor_exp: LOrExp,
+}
+
+// endregion 常量声明
+
+// region 变量声明
+
+#[derive(Debug)]
+pub struct VarDecl {
+    pub b_type: String,
+    pub var_def_list: Vec<VarDef>,
 }
 
 #[derive(Debug)]
-pub enum Decl {
-    Const(ConstDecl),
+pub struct VarDef {
+    pub ident: String,
+    pub init_val: Option<InitVal>, // 可以没有初始化值
 }
 
 #[derive(Debug)]
-pub struct ConstDecl {
-    pub b_type: String, 
-    pub const_def_list: Vec<ConstDef>,
+pub struct InitVal {
+    pub exp: Exp,
 }
+
+// endregion 变量声明
 
 // region 表达式
 /// ```text
@@ -123,7 +154,7 @@ pub enum UnaryExp {
 pub enum PrimaryExp {
     Number(i32),
     Paren(Box<Exp>),
-    LVal(String), // LVal ::= IDENT,表示对一个标识符(常量名)的引用
+    LVal(LVal), // LVal ::= IDENT,表示对一个标识符(常量名)的引用
 }
 
 #[derive(Debug)]

@@ -9,13 +9,6 @@ match {
   r"//[^\n\r]*[\n\r]*" => {},
   r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => {},
 
-//  // 双字符运算符必须在单字符运算符之前匹配
-//  "<=" => LEQ,
-//  ">=" => GEQ,
-//  "==" => EQ,
-//  "!=" => NEQ,
-//  "&&" => LAND,
-//  "||" => LOR,
 
   // 剩下的情况采用默认方式处理
   _
@@ -38,7 +31,30 @@ BlockItem: BlockItem = {
     <stmt: Stmt> => BlockItem::Stmt(stmt),
 }
 
-Decl: Decl = <const_decl: ConstDecl> => Decl::Const(const_decl);
+Decl: Decl = {
+    <const_decl: ConstDecl> => Decl::Const(const_decl),
+    <var_decl: VarDecl> => Decl::Var(var_decl),
+}
+
+BType: String = "int" => "int".to_string();
+
+VarDecl: VarDecl =  {
+    <b_type: BType> <h: VarDef> <t: ("," <VarDef>)*> ";" => {
+        let mut var_def_list = vec![h];
+        for item in t {
+            var_def_list.push(item);
+        }
+        VarDecl { b_type, var_def_list }
+    }
+}
+
+// 可选初始化
+VarDef: VarDef = {
+    <id:Ident> => VarDef { ident: id, init_val: None },
+    <id:Ident> "=" <init_val: InitVal> => VarDef { ident: id, init_val: Some(init_val) },
+}
+
+InitVal: InitVal = <exp:Exp> => InitVal { exp };
 
 ConstDecl: ConstDecl = {
     "const" <b_type: BType> <h: ConstDef> <t: ("," <ConstDef>)*> ";" => {
@@ -48,17 +64,18 @@ ConstDecl: ConstDecl = {
         }
         ConstDecl { b_type, const_def_list }
     }
-};
-
-BType: String = "int" => "int".to_string();
+}
 
 ConstDef: ConstDef = <id:Ident> "=" <const_init_val:ConstInitVal> => ConstDef { ident: id, const_init_val };
 
 ConstInitVal: ConstInitVal = <exp:ConstExp> => ConstInitVal { const_exp: exp };
 
-ConstExp: ConstExp = <exp:AddExp> => ConstExp { add_exp: exp };
+ConstExp: ConstExp = <exp: LOrExp> => ConstExp { lor_exp: exp };
 
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt::Return(exp);
+Stmt: Stmt = {
+    "return" <exp: Exp> ";" => Stmt::Return(exp),
+    <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(lval, exp),
+}
 
 Exp: Exp = <lor_exp: LOrExp> => Exp::LOr(Box::new(lor_exp));
 
@@ -132,7 +149,7 @@ PrimaryExp: PrimaryExp = {
     <lval: LVal> => PrimaryExp::LVal(lval),
 }
 
-LVal: String = <id:Ident> => id;
+LVal: LVal = <id: Ident> => LVal { ident: id };
 
 Number: i32 = <num: IntConst> => <>;
 

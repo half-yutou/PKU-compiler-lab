@@ -1,10 +1,17 @@
-use koopa::ir::{BinaryOp, FunctionData, Program, Type, Value};
+use crate::ast::{AddExp, Block, BlockItem, CompUnit, ConstExp, Decl, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, Stmt, UnaryExp, UnaryOp};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
-use crate::ast::{CompUnit, Exp, UnaryExp, PrimaryExp, UnaryOp, AddExp, MulExp, MulDivOp, PlusSubOp, LOrExp, LAndExp, EqExp, RelExp, EqOp, RelOp, Block, BlockItem, Stmt, Decl, ConstExp, ConstInitVal};
+use koopa::ir::{BinaryOp, FunctionData, Program, Type, Value};
 use std::collections::HashMap;
 
-// 符号表：存储常量名到值的映射
-type SymbolTable = HashMap<String, i32>;
+// 符号信息：区分常量和变量
+#[derive(Debug, Clone)]
+enum SymbolInfo {
+    Const(i32),           // 常量：直接存储值
+    Var(Value),           // 变量：存储 alloc 返回的指针
+}
+
+// 符号表：存储标识符到符号信息的映射
+type SymbolTable = HashMap<String, SymbolInfo>;
 
 pub fn generate_koopa_ir(ast: CompUnit) -> Program {
     let mut program = Program::new();
@@ -31,21 +38,39 @@ pub fn generate_koopa_ir(ast: CompUnit) -> Program {
 fn generate_block(block: &Block, func_data: &mut FunctionData, symbol_table: &mut SymbolTable) {
     for item in &block.block_item_list {
         match item {
-            BlockItem::Decl(decl) => generate_decl(decl, symbol_table),
+            BlockItem::Decl(decl) => generate_decl(decl, func_data, symbol_table),
             BlockItem::Stmt(stmt) => generate_stmt(stmt, func_data, symbol_table),
         }
     }
 }
 
-// 处理声明（常量定义）
-fn generate_decl(decl: &Decl, symbol_table: &mut SymbolTable) {
+// 处理声明（常量定义和变量定义）
+fn generate_decl(decl: &Decl, func_data: &mut FunctionData, symbol_table: &mut SymbolTable) {
     match decl {
         Decl::Const(const_decl) => {
             for def in &const_decl.const_def_list {
                 // 编译时计算常量值
                 let value = evaluate_const_exp(&def.const_init_val.const_exp, symbol_table);
                 // 存入符号表
-                symbol_table.insert(def.ident.clone(), value);
+                symbol_table.insert(def.ident.clone(), SymbolInfo::Const(value));
+            }
+        }
+        Decl::Var(var_decl) => {
+            for def in &var_decl.var_def_list {
+                // 为变量分配内存
+                let alloc_inst = func_data.dfg_mut().new_value().alloc(Type::get_i32());
+                let entry = func_data.layout().entry_bb().unwrap();
+                func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(alloc_inst).unwrap();
+                
+                // 如果有初始化值，生成 store 指令
+                if let Some(init_val) = &def.init_val {
+                    let init_value = generate_exp(&init_val.exp, func_data, symbol_table);
+                    let store_inst = func_data.dfg_mut().new_value().store(init_value, alloc_inst);
+                    func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(store_inst).unwrap();
+                }
+                
+                // 存入符号表
+                symbol_table.insert(def.ident.clone(), SymbolInfo::Var(alloc_inst));
             }
         }
     }
@@ -59,6 +84,26 @@ fn generate_stmt(stmt: &Stmt, func_data: &mut FunctionData, symbol_table: &mut S
             let ret = func_data.dfg_mut().new_value().ret(Some(value));
             let entry = func_data.layout().entry_bb().unwrap();
             func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(ret).unwrap();
+        }
+        Stmt::Assign(lval, exp) => {
+            // 生成右侧表达式的值
+            let value = generate_exp(exp, func_data, symbol_table);
+            
+            // 获取左值对应的指针
+            match symbol_table.get(&lval.ident) {
+                Some(SymbolInfo::Var(ptr)) => {
+                    // 生成 store 指令
+                    let store_inst = func_data.dfg_mut().new_value().store(value, *ptr);
+                    let entry = func_data.layout().entry_bb().unwrap();
+                    func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(store_inst).unwrap();
+                }
+                Some(SymbolInfo::Const(_)) => {
+                    panic!("Cannot assign to constant '{}'!", lval.ident);
+                }
+                None => {
+                    panic!("Variable '{}' not found!", lval.ident);
+                }
+            }
         }
         Stmt::Exp(Some(exp)) => {
             // 表达式语句，生成IR但丢弃结果
@@ -77,7 +122,7 @@ fn generate_stmt(stmt: &Stmt, func_data: &mut FunctionData, symbol_table: &mut S
 // region 编译时常量求值
 
 fn evaluate_const_exp(const_exp: &ConstExp, symbol_table: &SymbolTable) -> i32 {
-    evaluate_add_exp(&const_exp.add_exp, symbol_table)
+    evaluate_lor_exp_for_const(&const_exp.lor_exp, symbol_table)
 }
 
 fn evaluate_add_exp(add_exp: &AddExp, symbol_table: &SymbolTable) -> i32 {
@@ -127,8 +172,12 @@ fn evaluate_primary_exp(primary: &PrimaryExp, symbol_table: &SymbolTable) -> i32
     match primary {
         PrimaryExp::Number(num) => *num,
         PrimaryExp::Paren(exp) => evaluate_exp_for_const(exp, symbol_table),
-        PrimaryExp::LVal(ident) => {
-            *symbol_table.get(ident).expect(&format!("Constant '{}' not found", ident))
+        PrimaryExp::LVal(lval) => {
+            match symbol_table.get(&lval.ident) {
+                Some(SymbolInfo::Const(value)) => *value,
+                Some(SymbolInfo::Var(_)) => panic!("Cannot use variable '{}' in constant expression", lval.ident),
+                None => panic!("Identifier '{}' not found", lval.ident),
+            }
         }
     }
 }
@@ -199,7 +248,7 @@ fn evaluate_rel_exp_for_const(rel_exp: &RelExp, symbol_table: &SymbolTable) -> i
 
 // endregion 编译时常量求值
 
-// region 运行时IR生成
+// region 运行时IR生成（需要修改 generate_primary_exp）
 
 fn generate_exp(exp: &Exp, func_data: &mut FunctionData, symbol_table: &mut SymbolTable) -> Value {
     match exp {
@@ -372,10 +421,23 @@ fn generate_primary_exp(primary: &PrimaryExp, func_data: &mut FunctionData, symb
             func_data.dfg_mut().new_value().integer(*num)
         },
         PrimaryExp::Paren(exp) => generate_exp(exp, func_data, symbol_table),
-        PrimaryExp::LVal(ident) => {
-            // 从符号表查找常量值，直接生成整数IR
-            let value = *symbol_table.get(ident).expect(&format!("Constant '{}' not found", ident));
-            func_data.dfg_mut().new_value().integer(value)
+        PrimaryExp::LVal(lval) => {
+            match symbol_table.get(&lval.ident) {
+                Some(SymbolInfo::Const(value)) => {
+                    // 常量：直接生成整数IR
+                    func_data.dfg_mut().new_value().integer(*value)
+                }
+                Some(SymbolInfo::Var(ptr)) => {
+                    // 变量：生成 load 指令
+                    let load_inst = func_data.dfg_mut().new_value().load(*ptr);
+                    let entry = func_data.layout().entry_bb().unwrap();
+                    func_data.layout_mut().bb_mut(entry).insts_mut().push_key_back(load_inst).unwrap();
+                    load_inst
+                }
+                None => {
+                    panic!("Identifier '{}' not found", lval.ident);
+                }
+            }
         }
     }
 }
