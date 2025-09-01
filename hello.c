@@ -1,5 +1,5 @@
 int main() {
   // 忽略我的存在
-  const int a = 1 || 0;
+  int a = 5;
   return a;
 }

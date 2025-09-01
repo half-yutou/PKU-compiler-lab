@@ -7,7 +7,7 @@ doc:https://pku-minic.github.io/online-doc/#/
 - [x] lab1: 简单表达式koopaIR生成
 - [x] lab2: 简单表达式riscv生成
 - [x] lab3: 表达式(一元表达式, 算术表达式, 逻辑表达式)
-- [ ] lab4: 常量与变量
+- [x] lab4: 常量与变量
 - [ ] lab5: 语句块和作用域
 - [ ] lab6: if语句
 - [ ] lab7: while语句

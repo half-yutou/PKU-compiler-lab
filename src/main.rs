@@ -50,7 +50,7 @@ fn output_koopa_ir(koopa_ir_in_memory: Program, output_file: &str) -> Result<()>
 
 // 输出risc-v汇编到指定文件
 fn output_riscv_assembly(koopa_ir_in_memory: Program, output_file: &str) -> Result<()> {
-    let riscv_assembly_text = lab3::gen_asm::generate_riscv_assembly(koopa_ir_in_memory);
+    let riscv_assembly_text = lab4::gen_asm::generate_riscv_assembly(koopa_ir_in_memory);
     std::fs::write(output_file, riscv_assembly_text)?;
     Ok(())
 }
