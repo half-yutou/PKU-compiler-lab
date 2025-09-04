@@ -28,7 +28,7 @@ pub enum BlockItem {
 
 #[derive(Debug)]
 pub enum Stmt {
-    Return(Exp),
+    Return(Option<Exp>),
     Exp(Option<Exp>),
     Block(Block),
     Assign(LVal, Exp) // 赋值语句: LVal = Exp

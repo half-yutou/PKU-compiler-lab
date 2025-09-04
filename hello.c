@@ -1,5 +1,14 @@
 int main() {
-  // 忽略我的存在
-  int a = 5;
-  return a;
+    int a = 5;
+    {
+        int b = 10;
+        {
+            int a = 0;
+            {
+                int c = a + b;
+                return c;
+            }
+        }
+    }
+    return a;
 }
