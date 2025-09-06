@@ -11,7 +11,7 @@ impl IRGen {
             Stmt::Assign(lval, exp) => {
                 // 根据右侧表达式求值
                 let value = generate_exp(exp, func_data, &mut self.scope_stack);
-                
+
                 // 获取左值的指针
                 match self.scope_stack.lookup(&lval.ident) {
                     Some(SymbolInfo::Var(ptr)) => {
@@ -63,6 +63,7 @@ impl IRGen {
                 // 嵌套代码块，递归处理
                 self.generate_block(block)
             }
+            _ => false
         }
     }
 }

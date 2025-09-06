@@ -31,7 +31,8 @@ pub enum Stmt {
     Return(Option<Exp>),
     Exp(Option<Exp>),
     Block(Block),
-    Assign(LVal, Exp) // 赋值语句: LVal = Exp
+    Assign(LVal, Exp), // 赋值语句: LVal = Exp
+    If(Exp, Box<Stmt>, Option<Box<Stmt>>), // if语句：条件，then分支，可选else分支
 }
 #[derive(Debug)]
 pub enum Decl {

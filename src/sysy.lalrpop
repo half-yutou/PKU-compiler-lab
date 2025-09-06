@@ -9,6 +9,9 @@ match {
   r"//[^\n\r]*[\n\r]*" => {},
   r"/\*[^*]*\*+(?:[^/*][^*]*\*+)*/" => {},
 
+  // 关键字
+  "if" => "if",
+  "else" => "else",
 
   // 剩下的情况采用默认方式处理
   _
@@ -73,10 +76,34 @@ ConstInitVal: ConstInitVal = <exp:ConstExp> => ConstInitVal { const_exp: exp };
 ConstExp: ConstExp = <exp: LOrExp> => ConstExp { lor_exp: exp };
 
 Stmt: Stmt = {
-    "return" <exp: Exp?> ";" => Stmt::Return(exp),
+    <matched: MatchedStmt> => matched,
+    <open: OpenStmt> => open,
+};
+
+// MatchedStmt: 完全匹配的语句（每个if都有else）
+MatchedStmt: Stmt = {
+    // 基本语句
     <lval: LVal> "=" <exp: Exp> ";" => Stmt::Assign(lval, exp),
-    <block: Block> => Stmt::Block(block),
     <exp: Exp?> ";" => Stmt::Exp(exp),
+    <block: Block> => Stmt::Block(block),
+    "return" <exp: Exp?> ";" => Stmt::Return(exp),
+    
+    // 完整的if-else语句（then和else都必须是MatchedStmt）
+    "if" "(" <cond: Exp> ")" <then_stmt: MatchedStmt> "else" <else_stmt: MatchedStmt> => {
+        Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt)))
+    },
+};
+
+// OpenStmt: 开放的语句
+OpenStmt: Stmt = {
+    // 不完整的if语句（没有else）
+    "if" "(" <cond: Exp> ")" <stmt: Stmt> => {
+        Stmt::If(cond, Box::new(stmt), None)
+    },
+    "if" "(" <cond: Exp> ")" <then: MatchedStmt>
+    "else" <else_then: OpenStmt> => {
+      Stmt::If(cond, Box::new(then), Some(Box::new(else_then)))
+    },
 }
 
 Exp: Exp = <lor_exp: LOrExp> => Exp::LOr(Box::new(lor_exp));
@@ -154,7 +181,6 @@ PrimaryExp: PrimaryExp = {
 LVal: LVal = <id: Ident> => LVal { ident: id };
 
 Number: i32 = <num: IntConst> => <>;
-
 
 // 如果匹配到标识符, 就返回这个字符串
 // 一对尖括号在此处指代的是正则表达式匹配到的字符串 (&str)

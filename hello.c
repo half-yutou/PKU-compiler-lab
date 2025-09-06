@@ -1,14 +1,20 @@
 int main() {
-    int a = 5;
-    {
-        int b = 10;
-        {
-            int a = 0;
-            {
-                int c = a + b;
-                return c;
-            }
+    int a = 1;
+    int b = 2;
+    
+    if (a > 0) {
+        if (b > 1) {
+            return 10;
+        } else {
+            return 20;
+        }
+    } else {
+        if (b < 0) {
+            return 30;
+        } else {
+            return 40;
         }
     }
-    return a;
+    
+    return 50;
 }
