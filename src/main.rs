@@ -1,6 +1,6 @@
 use koopa::ir::Program;
 use lalrpop_util::lalrpop_mod;
-use pku_compiler::{lab5plus, lab6};
+use pku_compiler::lab6;
 use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
@@ -51,7 +51,7 @@ fn output_koopa_ir(koopa_ir_in_memory: Program, output_file: &str) -> Result<()>
 
 // 输出risc-v汇编到指定文件
 fn output_riscv_assembly(koopa_ir_in_memory: Program, output_file: &str) -> Result<()> {
-    let riscv_assembly_text = lab5plus::codegen::generate_riscv_assembly(koopa_ir_in_memory);
+    let riscv_assembly_text = lab6::codegen::generate_riscv_assembly(koopa_ir_in_memory);
     std::fs::write(output_file, riscv_assembly_text)?;
     Ok(())
 }

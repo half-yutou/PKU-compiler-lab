@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind};
+use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind, BasicBlock};
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::entities::ValueData;
 
@@ -46,8 +46,17 @@ impl AsmGenerator {
             asm.push_str(&format!("  addi  sp, sp, -{}\n", self.stack_size));
         }
 
-        // 3. 生成实际指令
-        for (&_, bb_node) in func_data.layout().bbs() {
+        // 3. 生成基本块和指令
+        let mut is_first_bb = true;
+        for (&bb_handle, bb_node) in func_data.layout().bbs() {
+            // 第一个基本块不需要额外标签，因为函数名已经是标签
+            if !is_first_bb {
+                let bb_name = self.get_bb_label(bb_handle);
+                asm.push_str(&format!("{}:\n", bb_name));
+            }
+            is_first_bb = false;
+            
+            // 生成基本块内的指令
             for &inst_handle in bb_node.insts().keys() {
                 let value_data = func_data.dfg().value(inst_handle);
                 asm.push_str(&self.gen_instruction(inst_handle, value_data, func_data.dfg()));
@@ -88,7 +97,7 @@ impl AsmGenerator {
                     ValueKind::Integer(_) => {
                         // 常量不需要栈空间，可以直接用 li 指令或 x0 寄存器
                     },
-                    ValueKind::Return(_) | ValueKind::Store(_) => {
+                    ValueKind::Return(_) | ValueKind::Store(_) | ValueKind::Branch(_) | ValueKind::Jump(_) => {
                         // 这些指令不产生需要存储的值
                     },
                     _ => {
@@ -108,7 +117,6 @@ impl AsmGenerator {
     }
     
     fn gen_instruction(&mut self, inst_handle: Value, value_data: &ValueData, dfg: &DataFlowGraph) -> String {
-
         match value_data.kind() { 
             ValueKind::Integer(_) => { 
                 // integer 指令说明是常量数字
@@ -186,6 +194,25 @@ impl AsmGenerator {
 
                 asm
             }
+            ValueKind::Branch(branch) => {
+                let mut asm = String::new();
+                
+                // 加载条件值到寄存器
+                asm.push_str(&self.load_value_to_reg(branch.cond(), "t0", dfg));
+                
+                // 生成条件分支指令
+                let true_label = self.get_bb_label(branch.true_bb());
+                let false_label = self.get_bb_label(branch.false_bb());
+                
+                asm.push_str(&format!("  bnez  t0, {}\n", true_label));
+                asm.push_str(&format!("  j     {}\n", false_label));
+                
+                asm
+            }
+            ValueKind::Jump(jump) => {
+                let target_label = self.get_bb_label(jump.target());
+                format!("  j     {}\n", target_label)
+            }
             ValueKind::Alloc(_) => {
                 // alloc 指令不生成实际汇编代码，只记录栈偏移映射
                 // 映射关系已在 calculate_stack_size 中建立
@@ -250,7 +277,6 @@ impl AsmGenerator {
             }
              _ => String::new(),
         }
-        
     }
 
     // 将值加载到指定寄存器的辅助方法
@@ -273,5 +299,18 @@ impl AsmGenerator {
                 }
             }
         }
+    }
+
+    // 生成基本块标签的辅助方法
+    fn get_bb_label(&self, bb: BasicBlock) -> String {
+        // 将 BasicBlock 转换为字符串，然后清理特殊字符
+        let bb_str = format!("{:?}", bb);
+        // 移除 % 前缀和括号，只保留数字部分(riscv不支持label带小括号，故重新命名)
+        let cleaned = bb_str
+            .strip_prefix('%')
+            .unwrap_or(&bb_str)
+            .replace("BasicBlock(", "")
+            .replace(")", "");
+        format!("LBB{}", cleaned)
     }
 }
