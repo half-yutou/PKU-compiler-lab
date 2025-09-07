@@ -4,22 +4,26 @@ use crate::ast::{Block, BlockItem};
 use crate::lab6::irgen::IRGen;
 
 impl IRGen {
-    pub fn generate_block(&mut self, block: &Block) {
+    pub fn generate_block(&mut self, block: &Block) -> bool {
         // 进入新的作用域{}
         self.scope_stack.enter_scope();
         
+        let mut has_return = false;
         for block_item in &block.block_item_list {
-            
+            if has_return {
+                break;
+            }
             match block_item {
                 BlockItem::Decl(decl) => self.generate_decl(decl), 
                 BlockItem::Stmt(stmt) => {
-                    self.generate_stmt(stmt);
+                    has_return = self.generate_stmt(stmt);
                 }
             }
         }
         
         // 退出当前作用域{}
         self.scope_stack.exit_scope();
+        has_return
     }
 
     /// 确保指定基本块有终结指令，如果没有则添加默认的ret 0

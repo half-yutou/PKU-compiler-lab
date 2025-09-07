@@ -6,7 +6,7 @@ use crate::lab6::irgen::{IRGen, ControlFlowType};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder};
 
 impl IRGen {
-    pub fn generate_stmt(&mut self, stmt: &Stmt) {
+    pub fn generate_stmt(&mut self, stmt: &Stmt) -> bool{
         match stmt {
             Stmt::If(cond, then_stmt, else_stmt) => {
                 // 生成条件表达式的值
@@ -124,6 +124,8 @@ impl IRGen {
                 
                 // 弹出控制流上下文
                 self.pop_control_flow();
+                
+                false
             }
             
             Stmt::Assign(lval, exp) => {
@@ -149,6 +151,7 @@ impl IRGen {
                         panic!("Variable '{}' not found!", lval.ident);
                     }
                 }
+                false
             }
             
             Stmt::Return(exp_opt) => {
@@ -168,6 +171,7 @@ impl IRGen {
                         func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(ret_inst).unwrap();
                     }
                 }
+                true
             }
             
             Stmt::Exp(exp_opt) => {
@@ -181,11 +185,12 @@ impl IRGen {
                         // `;`空语句
                     }
                 }
+                false
             }
             
             Stmt::Block(block) => {
                 // 嵌套代码块，递归处理
-                self.generate_block(block);
+                self.generate_block(block)
             }
         }
     }
