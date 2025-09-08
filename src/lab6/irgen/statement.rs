@@ -1,7 +1,6 @@
 use crate::ast::Stmt;
 
 use crate::lab6::irgen::symbol::SymbolInfo;
-use crate::lab6::irgen::vars::generate_exp;
 use crate::lab6::irgen::{IRGen, ControlFlowType};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder};
 
@@ -10,10 +9,7 @@ impl IRGen {
         match stmt {
             Stmt::If(cond, then_stmt, else_stmt) => {
                 // 生成条件表达式的值
-                let cond_value = {
-                    let func_data = self.program.func_mut(self.function);
-                    generate_exp(cond, func_data, &mut self.scope_stack, self.current_bb.unwrap())
-                };
+                let cond_value = self.generate_exp(cond);
                 
                 self.bb_counter += 1;
                 // 创建基本块
@@ -37,13 +33,13 @@ impl IRGen {
                 // 在当前基本块生成条件分支指令
                 {
                     let func_data = self.program.func_mut(self.function);
-                    let current_bb = self.current_bb.unwrap_or_else(|| func_data.layout().entry_bb().unwrap());
+                    let current_bb = self.current_bb;
                     let br_inst = func_data.dfg_mut().new_value().branch(cond_value, then_bb, else_bb);
                     func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(br_inst).unwrap();
                 }
                 
                 // 处理then分支
-                self.current_bb = Some(then_bb);
+                self.current_bb = then_bb;
                 if let Stmt::Block(block) = then_stmt.as_ref() {
                     self.generate_block(block);
                 } else {
@@ -75,7 +71,7 @@ impl IRGen {
 
                 
                 // 处理else分支
-                self.current_bb = Some(else_bb);
+                self.current_bb = else_bb;
                 match else_stmt {
                     Some(stmt) => {
                         match stmt.as_ref() {
@@ -117,7 +113,7 @@ impl IRGen {
                 }
                 
                 // 设置当前基本块为end_bb
-                self.current_bb = Some(end_bb);
+                self.current_bb = end_bb;
                 
                 // 记录延迟跳转：如果当前end_bb为空且有外层控制流，记录跳转映射
                 self.record_pending_jump(end_bb);
@@ -130,10 +126,7 @@ impl IRGen {
             
             Stmt::Assign(lval, exp) => {
                 // 根据右侧表达式求值
-                let value = {
-                    let func_data = self.program.func_mut(self.function);
-                    generate_exp(exp, func_data, &mut self.scope_stack, self.current_bb.unwrap())
-                };
+                let value = self.generate_exp(exp);
                 
                 // 获取左值的指针
                 match self.scope_stack.lookup(&lval.ident) {
@@ -141,7 +134,7 @@ impl IRGen {
                         let func_data = self.program.func_mut(self.function);
                         // 生成 store 指令
                         let store_inst = func_data.dfg_mut().new_value().store(value, *ptr);
-                        let current_bb = self.current_bb.unwrap_or_else(|| func_data.layout().entry_bb().unwrap());
+                        let current_bb = self.current_bb;
                         func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
                     }
                     Some(SymbolInfo::Const(_)) => {
@@ -155,18 +148,21 @@ impl IRGen {
             }
             
             Stmt::Return(exp_opt) => {
-                let func_data = self.program.func_mut(self.function);
-                let current_bb = self.current_bb.unwrap_or_else(|| func_data.layout().entry_bb().unwrap());
-                
                 match exp_opt {
                     Some(exp) => {
                         // `return 1`有返回值的return语句
-                        let value = generate_exp(exp, func_data, &mut self.scope_stack, current_bb);
+                        let value = self.generate_exp(exp);
+                        
+                        let func_data = self.program.func_mut(self.function);
+                        let current_bb = self.current_bb;
                         let ret_inst = func_data.dfg_mut().new_value().ret(Some(value));
                         func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(ret_inst).unwrap();
                     }
                     None => {
                         // `return` 无返回值的return语句
+                        let func_data = self.program.func_mut(self.function);
+                        let current_bb = self.current_bb;
+
                         let ret_inst = func_data.dfg_mut().new_value().ret(None);
                         func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(ret_inst).unwrap();
                     }
@@ -178,8 +174,7 @@ impl IRGen {
                 match exp_opt {
                     Some(exp) => {
                         // `1+2;`表达式语句，生成IR但是丢弃结果
-                        let func_data = self.program.func_mut(self.function);
-                        generate_exp(exp, func_data, &mut self.scope_stack, self.current_bb.unwrap());
+                        self.generate_exp(exp);
                     }
                     None => {
                         // `;`空语句

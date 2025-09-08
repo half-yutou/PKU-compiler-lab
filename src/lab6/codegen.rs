@@ -25,13 +25,15 @@ pub fn generate_riscv_assembly(program: Program) -> String {
 struct AsmGenerator {
     stack_size: i32,                        // 当前栈帧大小
     value_stack_map: HashMap<Value, i32>,   // 中间值 -> 栈偏移映射
+    bb_param_stack_map: HashMap<(BasicBlock, usize), i32>, // 基本块参数栈映射
 }
 
 impl AsmGenerator {
     pub fn new() -> Self {
         Self {
             stack_size: 0, 
-            value_stack_map: HashMap::new(), 
+            value_stack_map: HashMap::new(),
+            bb_param_stack_map: HashMap::new(),
         }
     }
     
@@ -56,6 +58,14 @@ impl AsmGenerator {
             }
             is_first_bb = false;
             
+            // 处理基本块参数
+            let bb_data = func_data.dfg().bb(bb_handle);
+            for (i, &param) in bb_data.params().iter().enumerate() {
+                if let Some(&stack_offset) = self.bb_param_stack_map.get(&(bb_handle, i)) {
+                    self.value_stack_map.insert(param, stack_offset);
+                }
+            }
+            
             // 生成基本块内的指令
             for &inst_handle in bb_node.insts().keys() {
                 let value_data = func_data.dfg().value(inst_handle);
@@ -69,6 +79,18 @@ impl AsmGenerator {
     fn calculate_stack_size(&mut self, func_data: &FunctionData) {
         self.stack_size = 0;
         self.value_stack_map.clear();
+        self.bb_param_stack_map.clear();
+
+        // 首先处理所有基本块的参数（phi 节点参数）
+        for (&bb_handle, _) in func_data.layout().bbs() {
+            let bb_data = func_data.dfg().bb(bb_handle);
+            for (i, &param) in bb_data.params().iter().enumerate() {
+                let offset = self.stack_size;
+                self.bb_param_stack_map.insert((bb_handle, i), offset);
+                self.value_stack_map.insert(param, offset);
+                self.stack_size += 4;
+            }
+        }
 
         // 遍历所有指令，为每个产生值的指令分配栈空间
         for (&_, bb_node) in func_data.layout().bbs() {
@@ -121,6 +143,12 @@ impl AsmGenerator {
             ValueKind::Integer(_) => { 
                 // integer 指令说明是常量数字
                 // 常量数字的加载不需要具体指令，在load_value_to_reg调用时会生成将数字加载到寄存器的指令
+                String::new()
+            }
+            ValueKind::BlockArgRef(_) => {
+                // 基本块参数引用不需要生成指令
+                // 参数值已经通过跳转时的寄存器传递或栈传递
+                // 这里只需要确保参数在栈映射中有正确的位置
                 String::new()
             }
             ValueKind::Binary(binary) => {
@@ -210,8 +238,19 @@ impl AsmGenerator {
                 asm
             }
             ValueKind::Jump(jump) => {
+                let mut asm = String::new();
+                
+                // 处理跳转参数传递
+                for (i, &arg) in jump.args().iter().enumerate() {
+                    if let Some(&stack_offset) = self.bb_param_stack_map.get(&(jump.target(), i)) {
+                        asm.push_str(&self.load_value_to_reg(arg, "t0", dfg));
+                        asm.push_str(&format!("  sw    t0, {}(sp)\n", stack_offset));
+                    }
+                }
+                
                 let target_label = self.get_bb_label(jump.target());
-                format!("  j     {}\n", target_label)
+                asm.push_str(&format!("  j     {}\n", target_label));
+                asm
             }
             ValueKind::Alloc(_) => {
                 // alloc 指令不生成实际汇编代码，只记录栈偏移映射
@@ -309,7 +348,8 @@ impl AsmGenerator {
         let cleaned = bb_str
             .strip_prefix('%')
             .unwrap_or(&bb_str)
-            .replace("BasicBlock(", "")
+            .replace("BasicBlock", "")
+            .replace("(", "")
             .replace(")", "");
         format!("LBB{}", cleaned)
     }

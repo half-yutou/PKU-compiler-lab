@@ -28,7 +28,7 @@ pub struct IRGen {
     program:  Program,
     function: Function, // 存储functionId而不是functionData 
     scope_stack: ScopeStack,
-    current_bb: Option<BasicBlock>, // 当前正在生成指令的基本块
+    current_bb: BasicBlock, // 当前正在生成指令的基本块
     bb_counter: u32,
     control_flow_stack: Vec<ControlFlowContext>, // 控制流上下文栈
     pending_jumps: HashMap<BasicBlock, BasicBlock>, // 延迟跳转映射：内层end_bb -> 外层end_bb
@@ -52,7 +52,7 @@ impl IRGen {
             program,
             function: main_func, 
             scope_stack: ScopeStack::new(),
-            current_bb: Some(entry),
+            current_bb: entry,
             bb_counter: 0,
             control_flow_stack: Vec::new(),
             pending_jumps: HashMap::new(),
@@ -63,7 +63,7 @@ impl IRGen {
         self.generate_block(&ast.func_def.block);
         // 处理所有延迟跳转
         self.process_pending_jumps();
-        self.ensure_terminator(self.current_bb.unwrap());
+        self.ensure_terminator(self.current_bb);
         Ok(self.program)
     }
     
@@ -111,6 +111,26 @@ impl IRGen {
                 let jump_inst = func_data.dfg_mut().new_value().jump(to_bb);
                 func_data.layout_mut().bb_mut(from_bb).insts_mut().push_key_back(jump_inst).unwrap();
             }
+        }
+    }
+    /// 确保指定基本块有终结指令，如果没有则添加默认的ret 0
+    pub fn ensure_terminator(&mut self, bb: BasicBlock) {
+        let main_data = self.program.func_mut(self.function);
+        let bb_data = main_data.layout().bbs().node(&bb).unwrap();
+        let has_terminator = bb_data.insts().back_key()
+            .map(|inst| {
+                let value_data = main_data.dfg().value(*inst);
+                matches!(value_data.kind(), 
+                    koopa::ir::ValueKind::Return(_) | 
+                    koopa::ir::ValueKind::Jump(_) | 
+                    koopa::ir::ValueKind::Branch(_))
+            })
+            .unwrap_or(false);
+
+        if !has_terminator {
+            let zero = main_data.dfg_mut().new_value().integer(0);
+            let ret_inst = main_data.dfg_mut().new_value().ret(Some(zero));
+            main_data.layout_mut().bb_mut(bb).insts_mut().push_key_back(ret_inst).unwrap();
         }
     }
 
