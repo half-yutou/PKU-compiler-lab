@@ -92,6 +92,12 @@ MatchedStmt: Stmt = {
     "if" "(" <cond: Exp> ")" <then_stmt: MatchedStmt> "else" <else_stmt: MatchedStmt> => {
         Stmt::If(cond, Box::new(then_stmt), Some(Box::new(else_stmt)))
     },
+
+    "while" "(" <cond: Exp> ")" <stmt: MatchedStmt> => {
+        Stmt::While(cond, Box::new(stmt))
+    },
+    "break" ";" => Stmt::Break,
+    "continue" ";" => Stmt::Continue,
 };
 
 // OpenStmt: 开放的语句
@@ -100,9 +106,14 @@ OpenStmt: Stmt = {
     "if" "(" <cond: Exp> ")" <stmt: Stmt> => {
         Stmt::If(cond, Box::new(stmt), None)
     },
+
     "if" "(" <cond: Exp> ")" <then: MatchedStmt>
     "else" <else_then: OpenStmt> => {
       Stmt::If(cond, Box::new(then), Some(Box::new(else_then)))
+    },
+
+    "while" "(" <cond: Exp> ")" <body: OpenStmt> => {
+      Stmt::While(cond, Box::new(body))
     },
 }
 

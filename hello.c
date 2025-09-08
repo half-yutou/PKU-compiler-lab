@@ -1,14 +1,11 @@
 int main() {
-    if (1 > 3)
-        return 0;
-
-    if (1 > 2) {
-        if (2 > 3 || 3 > 4 && 4 > 5)
-            return 3;
-
-        return 1;
-    } else
-        return 2;
-
-    return 50;
+    int a = 1;
+    int b = 1;
+    int c = 1;
+    if (a == 1 || b == 3 && c == 1) {
+        while (b == 1 && b > 0 || c == 1) {
+            b = b + 1;
+        }
+    }
+    return a;
 }

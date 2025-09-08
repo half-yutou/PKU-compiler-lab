@@ -1,17 +1,110 @@
 use crate::ast::Stmt;
 
-use crate::lab6::irgen::symbol::SymbolInfo;
-use crate::lab6::irgen::{IRGen, ControlFlowType};
+use crate::lab7::irgen::symbol::SymbolInfo;
+use crate::lab7::irgen::{IRGen, ControlFlowType, LoopContext};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder};
 
 impl IRGen {
     pub fn generate_stmt(&mut self, stmt: &Stmt) -> bool{
         match stmt {
-            Stmt::Break => {false}
-
-            Stmt::Continue => {false}
-
-            Stmt::While(_, _) => {false}
+            Stmt::Break => {
+                if let Some(loop_context) = self.loop_stack.last() {
+                    let func_data = self.program.func_mut(self.function);
+                    let jump_inst = func_data.dfg_mut().new_value().jump(loop_context.loop_end);
+                    func_data.layout_mut().bb_mut(self.current_bb).insts_mut().push_key_back(jump_inst).unwrap();
+                    true // 表示已添加终结指令
+                } else {
+                    panic!("break statement outside of loop");
+                }
+            }
+            
+            Stmt::Continue => {
+                if let Some(loop_context) = self.loop_stack.last() {
+                    let func_data = self.program.func_mut(self.function);
+                    let jump_inst = func_data.dfg_mut().new_value().jump(loop_context.loop_header);
+                    func_data.layout_mut().bb_mut(self.current_bb).insts_mut().push_key_back(jump_inst).unwrap();
+                    true // 表示已添加终结指令
+                } else {
+                    panic!("continue statement outside of loop");
+                }
+            }
+            
+            Stmt::While(cond, stmt) => {
+                self.bb_counter += 1;
+                
+                // 创建循环相关的基本块
+                let (loop_header, loop_body, loop_end) = {
+                    let func_data = self.program.func_mut(self.function);
+                    let loop_header = func_data.dfg_mut().new_bb().basic_block(Some(format!("%loop_header_{}", self.bb_counter)));
+                    let loop_body = func_data.dfg_mut().new_bb().basic_block(Some(format!("%loop_body_{}", self.bb_counter)));
+                    let loop_end = func_data.dfg_mut().new_bb().basic_block(Some(format!("%loop_end_{}", self.bb_counter)));
+                    
+                    // 将基本块添加到函数布局中
+                    func_data.layout_mut().bbs_mut().push_key_back(loop_header).unwrap();
+                    func_data.layout_mut().bbs_mut().push_key_back(loop_body).unwrap();
+                    func_data.layout_mut().bbs_mut().push_key_back(loop_end).unwrap();
+                    
+                    (loop_header, loop_body, loop_end)
+                };
+                
+                // 从当前基本块跳转到循环头
+                {
+                    let func_data = self.program.func_mut(self.function);
+                    let jump_inst = func_data.dfg_mut().new_value().jump(loop_header);
+                    func_data.layout_mut().bb_mut(self.current_bb).insts_mut().push_key_back(jump_inst).unwrap();
+                }
+                
+                // 推入循环上下文和控制流上下文
+                self.loop_stack.push(LoopContext {
+                    loop_header,
+                    loop_end,
+                });
+                self.push_control_flow(loop_end, ControlFlowType::While {
+                    loop_header,
+                    loop_end,
+                });
+                
+                // 生成循环头（条件检查）
+                self.current_bb = loop_header;
+                let cond_value = self.generate_exp(cond);
+                
+                // 生成条件分支：条件为真跳转到循环体，为假跳转到循环结束
+                {
+                    let func_data = self.program.func_mut(self.function);
+                    let br_inst = func_data.dfg_mut().new_value().branch(cond_value, loop_body, loop_end);
+                    func_data.layout_mut().bb_mut(self.current_bb).insts_mut().push_key_back(br_inst).unwrap();
+                }
+                
+                // 生成循环体
+                self.current_bb = loop_body;
+                let has_terminator = if let Stmt::Block(block) = stmt.as_ref() {
+                    self.generate_block(block)
+                } else {
+                    self.scope_stack.enter_scope();
+                    let result = self.generate_stmt(stmt);
+                    self.scope_stack.exit_scope();
+                    result
+                };
+                
+                // 只有在循环体没有终结指令时才跳回循环头
+                if !has_terminator {
+                    let func_data = self.program.func_mut(self.function);
+                    let jump_inst = func_data.dfg_mut().new_value().jump(loop_header);
+                    func_data.layout_mut().bb_mut(self.current_bb).insts_mut().push_key_back(jump_inst).unwrap();
+                }
+                
+                // 设置当前基本块为循环结束
+                self.current_bb = loop_end;
+                
+                // 记录延迟跳转：如果当前loop_end有外层控制流，记录跳转映射
+                self.record_pending_jump(loop_end);
+                
+                // 弹出上下文
+                self.loop_stack.pop();
+                self.pop_control_flow();
+                
+                false
+            }
             
             Stmt::If(cond, then_stmt, else_stmt) => {
                 // 生成条件表达式的值

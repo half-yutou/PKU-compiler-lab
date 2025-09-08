@@ -33,6 +33,9 @@ pub enum Stmt {
     Block(Block),
     Assign(LVal, Exp), // 赋值语句: LVal = Exp
     If(Exp, Box<Stmt>, Option<Box<Stmt>>), // if语句：条件，then分支，可选else分支
+    While(Exp, Box<Stmt>), 
+    Break,
+    Continue,
 }
 #[derive(Debug)]
 pub enum Decl {

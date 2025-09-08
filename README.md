@@ -10,7 +10,7 @@ doc:https://pku-minic.github.io/online-doc/#/
 - [x] lab4: 常量与变量
 - [x] lab5: 语句块和作用域
 - [x] lab6: if语句
-- [ ] lab7: while语句
+- [x] lab7: while语句
 - [ ] lab8: 函数
 - [ ] lab9: 数组
 
