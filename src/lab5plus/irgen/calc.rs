@@ -9,7 +9,7 @@
 //!                         └── UnaryExp (一元运算 + - !)
 //!                             └── PrimaryExp (最高优先级)
 //! ```
-use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
+use crate::lab5plus::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
 use crate::lab5plus::irgen::symbol::{ScopeStack, SymbolInfo};
 use crate::lab5plus::irgen::calc;
 

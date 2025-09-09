@@ -1,6 +1,6 @@
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
-use crate::ast::CompUnit;
+use crate::lab6::ast::CompUnit;
 use crate::lab6::irgen::symbol::ScopeStack;
 use std::collections::HashMap;
 

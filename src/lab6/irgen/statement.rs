@@ -1,4 +1,4 @@
-use crate::ast::Stmt;
+use crate::lab6::ast::Stmt;
 
 use crate::lab6::irgen::symbol::SymbolInfo;
 use crate::lab6::irgen::{IRGen, ControlFlowType};

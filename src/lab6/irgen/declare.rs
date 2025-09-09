@@ -1,4 +1,4 @@
-use crate::ast::Decl;
+use crate::lab6::ast::Decl;
 use crate::lab6::irgen::symbol::SymbolInfo;
 use crate::lab6::irgen::IRGen;
 use koopa::ir::builder::LocalInstBuilder;

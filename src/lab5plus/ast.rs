@@ -1,42 +1,18 @@
 #[derive(Debug)]
 pub struct CompUnit {
-    pub items: Vec<CompUnitItem>,
-}
-
-#[derive(Debug)]
-pub enum CompUnitItem {
-    FuncDef(FuncDef),
-    // 后续会添加全局变量声明
+    pub func_def: FuncDef,
 }
 
 #[derive(Debug)]
 pub struct FuncDef {
     pub func_type: FuncType,
     pub id: String,
-    pub params: Option<FuncFParams>,
     pub block: Block,
 }
 
 #[derive(Debug)]
 pub enum FuncType {
     Int,
-    Void,
-}
-
-#[derive(Debug)]
-pub struct FuncFParams {
-    pub params: Vec<FuncFParam>, // 形参列表
-}
-
-#[derive(Debug)]
-pub struct FuncFParam {
-    pub b_type: String,
-    pub ident: String,
-}
-
-#[derive(Debug)]
-pub struct FuncRParams {
-    pub params: Vec<Exp>,   // 实参列表
 }
 
 #[derive(Debug)]
@@ -61,7 +37,6 @@ pub enum Stmt {
     Break,
     Continue,
 }
-
 #[derive(Debug)]
 pub enum Decl {
     Const(ConstDecl),
@@ -177,7 +152,6 @@ pub enum MulExp {
 pub enum UnaryExp {
     Primary(PrimaryExp),
     Unary(UnaryOp, Box<UnaryExp>),
-    FuncCall(String, Option<FuncRParams>), // 函数调用(函数名, 可选参数列表)
 }
 
 #[derive(Debug)]

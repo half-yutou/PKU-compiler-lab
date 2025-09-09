@@ -1,6 +1,6 @@
 use koopa::ir::{Function, FunctionData, Program, Type};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
-use crate::ast::CompUnit;
+use crate::lab5plus::ast::CompUnit;
 use crate::lab5plus::irgen::symbol::ScopeStack;
 
 pub mod symbol;

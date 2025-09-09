@@ -1,6 +1,6 @@
 use koopa::ir::Program;
 use lalrpop_util::lalrpop_mod;
-use pku_compiler::lab7;
+use pku_compiler::{lab7, lab8};
 use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
@@ -26,7 +26,7 @@ fn main() -> Result<()> {
 
     // 调用 lalrpop 生成的 parser 解析输入文件
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
-    let ir_gen = lab7::irgen::IRGen::new();
+    let ir_gen = lab8::irgen::IRGen::new();
     let koopa_ir_in_memory = ir_gen.generate_koopa_ir(ast).unwrap();
 
     if mode == MODE_KOOPA {
@@ -51,7 +51,7 @@ fn output_koopa_ir(koopa_ir_in_memory: Program, output_file: &str) -> Result<()>
 
 // 输出risc-v汇编到指定文件
 fn output_riscv_assembly(koopa_ir_in_memory: Program, output_file: &str) -> Result<()> {
-    let riscv_assembly_text = lab7::codegen::generate_riscv_assembly(koopa_ir_in_memory);
+    let riscv_assembly_text = lab8::codegen::generate_riscv_assembly(koopa_ir_in_memory);
     std::fs::write(output_file, riscv_assembly_text)?;
     Ok(())
 }

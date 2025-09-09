@@ -1,4 +1,4 @@
-use crate::ast::Stmt;
+use crate::lab5plus::ast::Stmt;
 use crate::lab5plus::irgen::vars::generate_exp;
 use crate::lab5plus::irgen::IRGen;
 use koopa::ir::builder::LocalInstBuilder;

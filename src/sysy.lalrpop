@@ -12,20 +12,61 @@ match {
   // 关键字
   "if" => "if",
   "else" => "else",
+  "void" => "void",  // 新增void关键字
 
   // 剩下的情况采用默认方式处理
   _
 }
 
-pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { <> };
+// 修改CompUnit以支持多个函数定义
+pub CompUnit: CompUnit = {
+    <items: CompUnitItem+> => CompUnit { items }
+};
 
+// 新增CompUnitItem规则
+CompUnitItem: CompUnitItem = {
+    <func_def: FuncDef> => CompUnitItem::FuncDef(func_def),
+};
+
+// 修改FuncDef以支持函数参数
 FuncDef: FuncDef = {
-  <func_type: FuncType> <id: Ident> "(" ")" <block: Block> => {
-    FuncDef { <> }
-  }
+    <func_type: FuncType> <id: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
+        FuncDef { func_type, id, params, block }
+    }
 }
 
-FuncType: FuncType = "int" => FuncType::Int;
+// 修改FuncType以支持void类型
+FuncType: FuncType = {
+    "int" => FuncType::Int,
+    "void" => FuncType::Void,
+}
+
+// 新增函数形参列表规则
+FuncFParams: FuncFParams = {
+    <h: FuncFParam> <t: ("," <FuncFParam>)*> => {
+        let mut params = vec![h];
+        for param in t {
+            params.push(param);
+        }
+        FuncFParams { params }
+    }
+};
+
+// 新增单个函数形参规则
+FuncFParam: FuncFParam = {
+    <b_type: BType> <ident: Ident> => FuncFParam { b_type, ident }
+};
+
+// 新增函数实参列表规则
+FuncRParams: FuncRParams = {
+    <h: Exp> <t: ("," <Exp>)*> => {
+        let mut params = vec![h];
+        for param in t {
+            params.push(param);
+        }
+        FuncRParams { params }
+    }
+};
 
 Block: Block = "{" <items: BlockItem*> "}" => Block { block_item_list: items };
 
@@ -149,9 +190,11 @@ MulExp: MulExp = {
     <mul_exp: MulExp> <mul_div_op: MulDivOp> <unary_exp: UnaryExp> => MulExp::MulDiv(Box::new(mul_exp), mul_div_op, Box::new(unary_exp)),
 }
 
+// 修改UnaryExp以支持函数调用
 UnaryExp: UnaryExp = {
     <primary_exp: PrimaryExp> => UnaryExp::Primary(primary_exp),
     <unary_op: UnaryOp> <unary_exp: UnaryExp> => UnaryExp::Unary(unary_op, Box::new(unary_exp)),
+    <id: Ident> "(" <params: FuncRParams?> ")" => UnaryExp::FuncCall(id, params),  // 新增函数调用
 }
 
 UnaryOp: UnaryOp = {

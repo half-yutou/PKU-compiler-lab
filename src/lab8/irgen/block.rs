@@ -1,7 +1,7 @@
-use crate::lab5plus::ast::{Block, BlockItem};
-use crate::lab5plus::irgen::IRGen;
+use crate::ast::{Block, BlockItem};
+use crate::lab8::irgen::{FunctionIRGen, IRGen};
 
-impl IRGen {
+impl<'a> FunctionIRGen<'a> {
     pub fn generate_block(&mut self, block: &Block) -> bool {
         // 进入新的作用域{}
         self.scope_stack.enter_scope();
@@ -11,7 +11,6 @@ impl IRGen {
             if has_return {
                 break;
             }
-            
             match block_item {
                 BlockItem::Decl(decl) => self.generate_decl(decl), 
                 BlockItem::Stmt(stmt) => {
@@ -24,4 +23,6 @@ impl IRGen {
         self.scope_stack.exit_scope();
         has_return
     }
+
+
 }

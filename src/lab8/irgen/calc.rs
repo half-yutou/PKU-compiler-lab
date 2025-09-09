@@ -9,11 +9,11 @@
 //!                         └── UnaryExp (一元运算 + - !)
 //!                             └── PrimaryExp (最高优先级)
 //! ```
-use crate::lab7::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
-use crate::lab7::irgen::symbol::SymbolInfo;
-use crate::lab7::irgen::IRGen;
+use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
+use crate::lab8::irgen::symbol::SymbolInfo;
+use crate::lab8::irgen::{FunctionIRGen, IRGen};
 
-impl IRGen {
+impl<'a> FunctionIRGen<'a> {
     pub fn evaluate_exp(&self, exp: &Exp) -> i32 {
         match exp {
             Exp::LOr(lor_exp) => self.evaluate_lor_exp(lor_exp),
@@ -71,8 +71,8 @@ impl IRGen {
                 let left_val = self.evaluate_rel_exp(left);
                 let right_val = self.evaluate_add_exp(right);
                 match op {
-                    RelOp::Lt => (left_val < right_val) as i32,
-                    RelOp::Gt => (left_val > right_val) as i32,
+                    RelOp::Lt => (left_val <  right_val) as i32,
+                    RelOp::Gt => (left_val >  right_val) as i32,
                     RelOp::Le => (left_val <= right_val) as i32,
                     RelOp::Ge => (left_val >= right_val) as i32,
                 }
@@ -120,6 +120,7 @@ impl IRGen {
                     UnaryOp::Not => if val == 0 { 1 } else { 0 },
                 }
             }
+            UnaryExp::FuncCall(_, _) => {0}
         }
     }
 

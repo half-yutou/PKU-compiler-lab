@@ -1,4 +1,4 @@
-use crate::ast::{Block, BlockItem};
+use crate::lab7::ast::{Block, BlockItem};
 use crate::lab7::irgen::IRGen;
 
 impl IRGen {

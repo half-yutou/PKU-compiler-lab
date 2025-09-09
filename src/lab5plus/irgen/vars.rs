@@ -11,7 +11,7 @@
 //! ```
 use koopa::ir::{BinaryOp, FunctionData, Value};
 use koopa::ir::builder::{LocalInstBuilder, ValueBuilder};
-use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
+use crate::lab5plus::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
 use crate::lab5plus::irgen::symbol::{ScopeStack, SymbolInfo};
 
 pub fn generate_exp(exp: &Exp, func_data: &mut FunctionData, scope_stack: &mut ScopeStack) -> Value {
