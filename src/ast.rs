@@ -6,7 +6,7 @@ pub struct CompUnit {
 #[derive(Debug)]
 pub enum CompUnitItem {
     FuncDef(FuncDef),
-    // 后续会添加全局变量声明
+    GlobalDecl(GlobalDecl), // 全局声明
 }
 
 #[derive(Debug)]
@@ -62,6 +62,14 @@ pub enum Stmt {
     Continue,
 }
 
+// 全局声明（只能在编译单元级别出现）
+#[derive(Debug)]
+pub enum GlobalDecl {
+    Const(ConstDecl),     // 全局常量
+    Var(GlobalVarDecl),   // 全局变量
+}
+
+// 局部声明（只能在块内出现）
 #[derive(Debug)]
 pub enum Decl {
     Const(ConstDecl),
@@ -101,6 +109,7 @@ pub struct ConstExp {
 
 // region 变量声明
 
+// 局部变量声明
 #[derive(Debug)]
 pub struct VarDecl {
     pub b_type: String,
@@ -110,7 +119,20 @@ pub struct VarDecl {
 #[derive(Debug)]
 pub struct VarDef {
     pub ident: String,
-    pub init_val: Option<InitVal>, // 可以没有初始化值
+    pub init_val: Option<InitVal>, // 局部变量可以没有初始化值
+}
+
+// 全局变量声明
+#[derive(Debug)]
+pub struct GlobalVarDecl {
+    pub b_type: String,
+    pub var_def_list: Vec<GlobalVarDef>,
+}
+
+#[derive(Debug)]
+pub struct GlobalVarDef {
+    pub ident: String,
+    pub init_val: Option<InitVal>, // 全局变量如果没有显式初始值，IR生成时会使用zeroinit
 }
 
 #[derive(Debug)]
@@ -158,7 +180,7 @@ pub enum LAndExp {
 #[derive(Debug)]
 pub enum LOrExp {
     LAnd(Box<LAndExp>),
-    LOr(Box<LOrExp>, Box<LAndExp>), // 不需要op，因为只有||
+    LOr(Box<LOrExp>, Box<LAndExp>), // 不需要op，因为||
 }
 
 #[derive(Debug)]

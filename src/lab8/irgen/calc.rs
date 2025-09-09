@@ -11,9 +11,9 @@
 //! ```
 use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
 use crate::lab8::irgen::symbol::SymbolInfo;
-use crate::lab8::irgen::{FunctionIRGen, IRGen};
+use crate::lab8::irgen::IRGen;
 
-impl<'a> FunctionIRGen<'a> {
+impl IRGen {
     pub fn evaluate_exp(&self, exp: &Exp) -> i32 {
         match exp {
             Exp::LOr(lor_exp) => self.evaluate_lor_exp(lor_exp),
@@ -129,9 +129,10 @@ impl<'a> FunctionIRGen<'a> {
             PrimaryExp::Number(num) => *num,
             PrimaryExp::Paren(exp) => self.evaluate_exp(exp),
             PrimaryExp::LVal(lval) => {
-                match self.scope_stack.lookup(&lval.ident) {
+                match self.function_irgen.scope_stack.lookup(&lval.ident) {
                     Some(SymbolInfo::Const(value)) => *value,
                     Some(SymbolInfo::Var(_)) => panic!("Cannot use variable '{}' in constant expression", lval.ident),
+                    Some(SymbolInfo::GlobalVar(_)) => panic!("Cannot use global variable '{}' in constant expression", lval.ident),
                     None => panic!("Identifier '{}' not found", lval.ident),
                 }
             }

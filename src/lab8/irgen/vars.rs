@@ -11,11 +11,11 @@
 //! ```
 use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
 use crate::lab8::irgen::symbol::SymbolInfo;
-use crate::lab8::irgen::FunctionIRGen;
+use crate::lab8::irgen::IRGen;
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
 use koopa::ir::{BinaryOp, Type, Value};
 
-impl<'a> FunctionIRGen<'a> {
+impl IRGen {
     pub fn generate_exp(&mut self, exp: &Exp) -> Value {
         match exp { 
             Exp::LOr(lor_exp) => self.generate_lor_exp(lor_exp)
@@ -46,7 +46,7 @@ impl<'a> FunctionIRGen<'a> {
 
     /// 接收 AST 节点，实现短路求值
     fn generate_lor_binary_op_ast(&mut self, left: &LOrExp, right: &LAndExp) -> Value {
-        self.bb_counter += 1;
+        self.function_irgen.bb_counter += 1;
         
         // 先创建所有需要的基本块
         let eval_rhs;
@@ -55,9 +55,8 @@ impl<'a> FunctionIRGen<'a> {
         let lor_end;
 
         {
-            let bb_counter = self.bb_counter;
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let bb_counter = self.function_irgen.bb_counter;
+            let func_data = self.function_data_mut();
             eval_rhs = func_data.dfg_mut().new_bb().basic_block(Some(format!("%eval_rhs_{}", bb_counter)));
             result_true = func_data.dfg_mut().new_bb().basic_block(Some(format!("%result_true_{}", bb_counter)));
             result_false = func_data.dfg_mut().new_bb().basic_block(Some(format!("%result_false_{}", bb_counter)));
@@ -67,14 +66,12 @@ impl<'a> FunctionIRGen<'a> {
         
         // 添加基本块到函数布局
         {
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let func_data = self.function_data_mut();
             func_data.layout_mut().bbs_mut().push_key_back(eval_rhs).unwrap();
             func_data.layout_mut().bbs_mut().push_key_back(result_true).unwrap();
             func_data.layout_mut().bbs_mut().push_key_back(result_false).unwrap();
             func_data.layout_mut().bbs_mut().push_key_back(lor_end).unwrap();
         }
-        
         
         let left_value = self.generate_lor_exp(left);
         
@@ -82,9 +79,8 @@ impl<'a> FunctionIRGen<'a> {
         let left_cond;
         let branch;
         {
-            let current_bb = self.current_bb.unwrap();
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let current_bb = self.current_bb();
+            let func_data = self.function_data_mut();
             let zero = func_data.dfg_mut().new_value().integer(0);
             left_cond = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, left_value, zero);
             func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(left_cond).unwrap();
@@ -96,25 +92,23 @@ impl<'a> FunctionIRGen<'a> {
         
         // result_true 基本块：左操作数为真，结果为 1
         {
-            self.current_bb = Some(result_true);
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            self.function_irgen.current_bb = Some(result_true);
+            let func_data = self.function_data_mut();
             let true_value = func_data.dfg_mut().new_value().integer(1);
             let jump_true = func_data.dfg_mut().new_value().jump_with_args(lor_end, vec![true_value]);
             func_data.layout_mut().bb_mut(result_true).insts_mut().push_key_back(jump_true).unwrap();
         }
         
         // eval_rhs 基本块：只有在左操作数为假时才计算右操作数
-        self.current_bb = Some(eval_rhs);
+        self.function_irgen.current_bb = Some(eval_rhs);
         let right_value = self.generate_land_exp(right);
         
         let right_cond;
         let branch_rhs;
         {
-            let current_bb = self.current_bb.unwrap();
+            let current_bb = self.current_bb();
             
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let func_data = self.function_data_mut();
             let zero_rhs = func_data.dfg_mut().new_value().integer(0);
             right_cond = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, right_value, zero_rhs);
             func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(right_cond).unwrap();
@@ -126,27 +120,25 @@ impl<'a> FunctionIRGen<'a> {
         
         // result_false 基本块：右操作数也为假，结果为 0
         {
-            self.current_bb = Some(result_false);
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            self.function_irgen.current_bb = Some(result_false);
+            let func_data = self.function_data_mut();
             let false_value = func_data.dfg_mut().new_value().integer(0);
             let jump_false = func_data.dfg_mut().new_value().jump_with_args(lor_end, vec![false_value]);
             func_data.layout_mut().bb_mut(result_false).insts_mut().push_key_back(jump_false).unwrap();
         }
         
         // 更新当前基本块为 lor_end
-        self.current_bb = Some(lor_end);
+        self.function_irgen.current_bb = Some(lor_end);
         
         // 获取基本块参数作为结果（相当于 phi 节点的结果）
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let func_data = self.function_data_mut();
         let phi_result = func_data.dfg().bb(lor_end).params()[0];
         phi_result
     }
 
     /// 接收 AST 节点，实现短路求值
     fn generate_land_binary_op_ast(&mut self, left: &LAndExp, right: &EqExp) -> Value {
-        self.bb_counter += 1;
+        self.function_irgen.bb_counter += 1;
         
         // 先创建所有需要的基本块
         let eval_rhs;
@@ -155,9 +147,8 @@ impl<'a> FunctionIRGen<'a> {
         let land_end;
 
         {
-            let bb_counter = self.bb_counter;
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let bb_counter = self.function_irgen.bb_counter;
+            let func_data = self.function_data_mut();
             eval_rhs = func_data.dfg_mut().new_bb().basic_block(Some(format!("%eval_rhs_{}", bb_counter)));
             result_true = func_data.dfg_mut().new_bb().basic_block(Some(format!("%result_true_{}", bb_counter)));
             result_false = func_data.dfg_mut().new_bb().basic_block(Some(format!("%result_false_{}", bb_counter)));
@@ -167,8 +158,7 @@ impl<'a> FunctionIRGen<'a> {
         
         // 添加基本块到函数布局
         {
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let func_data = self.function_data_mut();
             func_data.layout_mut().bbs_mut().push_key_back(eval_rhs).unwrap();
             func_data.layout_mut().bbs_mut().push_key_back(result_true).unwrap();
             func_data.layout_mut().bbs_mut().push_key_back(result_false).unwrap();
@@ -184,9 +174,8 @@ impl<'a> FunctionIRGen<'a> {
         let left_cond;
         let branch;
         {
-            let current_bb = self.current_bb.unwrap();
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let current_bb = self.current_bb();
+            let func_data = self.function_data_mut();
             zero = func_data.dfg_mut().new_value().integer(0);
             left_cond = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, left_value, zero);
             func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(left_cond).unwrap();
@@ -198,24 +187,22 @@ impl<'a> FunctionIRGen<'a> {
         
         // result_false 基本块：左操作数为假，结果为 0
         {
-            self.current_bb = Some(result_false);
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            self.function_irgen.current_bb = Some(result_false);
+            let func_data = self.function_data_mut();
             let false_value = func_data.dfg_mut().new_value().integer(0);
             let jump_false = func_data.dfg_mut().new_value().jump_with_args(land_end, vec![false_value]);
             func_data.layout_mut().bb_mut(result_false).insts_mut().push_key_back(jump_false).unwrap();
         }
         
         // eval_rhs 基本块：只有在左操作数为真时才计算右操作数
-        self.current_bb = Some(eval_rhs);
+        self.function_irgen.current_bb = Some(eval_rhs);
         let right_value = self.generate_eq_exp(right);
         
         let right_cond;
         let branch_rhs;
         {
-            let current_bb = self.current_bb.unwrap();
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            let current_bb = self.current_bb();
+            let func_data = self.function_data_mut();
             let zero_rhs = func_data.dfg_mut().new_value().integer(0);
             right_cond = func_data.dfg_mut().new_value().binary(BinaryOp::NotEq, right_value, zero_rhs);
             func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(right_cond).unwrap();
@@ -227,20 +214,18 @@ impl<'a> FunctionIRGen<'a> {
         
         // result_true 基本块：右操作数为真，结果为 1
         {
-            self.current_bb = Some(result_true);
-            let function_handler = self.function;
-            let func_data = self.program_mut().func_mut(function_handler);
+            self.function_irgen.current_bb = Some(result_true);
+            let func_data = self.function_data_mut();
             let true_value = func_data.dfg_mut().new_value().integer(1);
             let jump_true = func_data.dfg_mut().new_value().jump_with_args(land_end, vec![true_value]);
             func_data.layout_mut().bb_mut(result_true).insts_mut().push_key_back(jump_true).unwrap();
         }
         
         // 更新当前基本块为 land_end
-        self.current_bb = Some(land_end);
+        self.function_irgen.current_bb = Some(land_end);
         
         // 获取基本块参数作为结果
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let func_data = self.function_data_mut();
         let phi_result = func_data.dfg().bb(land_end).params()[0];
         phi_result
     }
@@ -258,9 +243,8 @@ impl<'a> FunctionIRGen<'a> {
     }
 
     fn generate_eq_binary_op(&mut self, op: &EqOp, left: Value, right: Value) -> Value {
-        let current_bb = self.current_bb;
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let current_bb = self.current_bb();
+        let func_data = self.function_data_mut();
         
         let binary_op = match op {
             EqOp::Eq => BinaryOp::Eq,
@@ -268,7 +252,7 @@ impl<'a> FunctionIRGen<'a> {
         };
 
         let inst = func_data.dfg_mut().new_value().binary(binary_op, left, right);
-        func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(inst).unwrap();
+        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(inst).unwrap();
         inst
     }
 
@@ -285,9 +269,8 @@ impl<'a> FunctionIRGen<'a> {
     }
 
     fn generate_rel_binary_op(&mut self, op: &RelOp, left: Value, right: Value) -> Value {
-        let current_bb = self.current_bb;
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let current_bb = self.current_bb();
+        let func_data = self.function_data_mut();
         
         let binary_op = match op {
             RelOp::Lt => BinaryOp::Lt,
@@ -297,7 +280,7 @@ impl<'a> FunctionIRGen<'a> {
         };
 
         let inst = func_data.dfg_mut().new_value().binary(binary_op, left, right);
-        func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(inst).unwrap();
+        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(inst).unwrap();
         inst
     }
 
@@ -314,9 +297,8 @@ impl<'a> FunctionIRGen<'a> {
     }
 
     fn generate_add_binary_op(&mut self, op: &PlusSubOp, left: Value, right: Value) -> Value {
-        let current_bb = self.current_bb;
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let current_bb = self.current_bb();
+        let func_data = self.function_data_mut();
         
         let binary_op = match op {
             PlusSubOp::Plus => BinaryOp::Add,
@@ -324,7 +306,7 @@ impl<'a> FunctionIRGen<'a> {
         };
 
         let inst = func_data.dfg_mut().new_value().binary(binary_op, left, right);
-        func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(inst).unwrap();
+        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(inst).unwrap();
         inst
     }
 
@@ -341,9 +323,8 @@ impl<'a> FunctionIRGen<'a> {
     }
 
     fn generate_mul_binary_op(&mut self, op: &MulDivOp, left: Value, right: Value) -> Value {
-        let current_bb = self.current_bb;
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let current_bb = self.current_bb();
+        let func_data = self.function_data_mut();
         
         let binary_op = match op {
             MulDivOp::Mul => BinaryOp::Mul,
@@ -352,7 +333,7 @@ impl<'a> FunctionIRGen<'a> {
         };
 
         let inst = func_data.dfg_mut().new_value().binary(binary_op, left, right);
-        func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(inst).unwrap();
+        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(inst).unwrap();
         inst
     }
 
@@ -366,7 +347,7 @@ impl<'a> FunctionIRGen<'a> {
             }
             UnaryExp::FuncCall(func_name, params) => {
                 // 查找函数句柄
-                let function_handler = if let Some(&func_handler) = self.irgen.functions.get(func_name) {
+                let function_handler = if let Some(&func_handler) = self.functions.get(func_name) {
                     func_handler
                 } else {
                     panic!("Function '{}' not found", func_name);
@@ -382,9 +363,8 @@ impl<'a> FunctionIRGen<'a> {
                 }
                 
                 // 生成函数调用指令
-                let current_bb = self.current_bb.unwrap();
-                let function_handler_self = self.function;
-                let func_data = self.program_mut().func_mut(function_handler_self);
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
                 
                 let call_inst = func_data.dfg_mut().new_value().call(function_handler, args);
                 func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(call_inst).unwrap();
@@ -395,56 +375,51 @@ impl<'a> FunctionIRGen<'a> {
     }
 
     fn generate_unary_op(&mut self, op: &UnaryOp, operand: Value) -> Value {
-        let current_bb = self.current_bb;
-        let function_handler = self.function;
-        let func_data = self.program_mut().func_mut(function_handler);
+        let current_bb = self.current_bb();
+        let func_data = self.function_data_mut();
         
         match op {
             UnaryOp::Plus => operand,
             UnaryOp::Minus => {
                 let zero = func_data.dfg_mut().new_value().integer(0);
                 let sub_inst = func_data.dfg_mut().new_value().binary(BinaryOp::Sub, zero, operand);
-                func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(sub_inst).unwrap();
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(sub_inst).unwrap();
                 sub_inst
             },
             UnaryOp::Not => {
                 let zero = func_data.dfg_mut().new_value().integer(0);
                 let eq_inst = func_data.dfg_mut().new_value().binary(BinaryOp::Eq, operand, zero);
-                func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(eq_inst).unwrap();
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(eq_inst).unwrap();
                 eq_inst
             }
         }
     }
 
     fn generate_primary_exp(&mut self, primary: &PrimaryExp) -> Value {
-        let current_bb = self.current_bb;
-        let function_handler = self.function;
-        
+        let current_bb = self.current_bb();
+
         match primary {
             PrimaryExp::Number(num) => {
-                let function_handler = self.function;
-                let func_data = self.program_mut().func_mut(function_handler);
+                let func_data = self.function_data_mut();
 
                 func_data.dfg_mut().new_value().integer(*num)
             },
             PrimaryExp::Paren(exp) => self.generate_exp(exp),
             PrimaryExp::LVal(lval) => {
-                let symbol_info = self.scope_stack.lookup(&lval.ident).cloned();
+                let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
                 match symbol_info {
                     Some(SymbolInfo::Const(value)) => {
-                        let function_handler = self.function;
-                        let func_data = self.program_mut().func_mut(function_handler);
+                        let func_data = self.function_data_mut();
 
                         // 常量：直接生成整数IR
                         func_data.dfg_mut().new_value().integer(value)
                     }
-                    Some(SymbolInfo::Var(ptr)) => {
-                        let function_handler = self.function;
-                        let func_data = self.program_mut().func_mut(function_handler);
+                    Some(SymbolInfo::Var(ptr)) | Some(SymbolInfo::GlobalVar(ptr)) => {
+                        let func_data = self.function_data_mut();
 
-                        // 变量：生成 load 指令
+                        // (全局或局部)变量：生成 load 指令
                         let load_inst = func_data.dfg_mut().new_value().load(ptr);
-                        func_data.layout_mut().bb_mut(current_bb.unwrap()).insts_mut().push_key_back(load_inst).unwrap();
+                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(load_inst).unwrap();
                         load_inst
                     }
                     None => {

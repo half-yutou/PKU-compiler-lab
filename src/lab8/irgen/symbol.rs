@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use koopa::ir::Value;
 
-/// 符号信息：区分常量和变量
+/// 符号信息：区分常量、局部变量和全局变量
 #[derive(Debug, Clone)]
 pub enum SymbolInfo {
     Const(i32),           // 常量：直接存储值
-    Var(Value),           // 变量：存储 alloc 返回的指针
+    Var(Value),           // 局部变量：存储 alloc 返回的指针
+    GlobalVar(Value),     // 全局变量：存储 global_alloc 返回的指针
 }
 
 // 作用域栈：支持嵌套作用域的符号表
@@ -45,6 +46,19 @@ impl ScopeStack {
             Ok(())
         } else {
             Err("No active scope".to_string())
+        }
+    }
+    
+    // 在全局作用域定义符号（用于全局变量和常量）
+    pub fn define_global(&mut self, name: String, info: SymbolInfo) -> Result<(), String> {
+        if let Some(global_scope) = self.scopes.first_mut() {
+            if global_scope.contains_key(&name) {
+                return Err(format!("Global symbol '{}' already defined", name))
+            }
+            global_scope.insert(name, info);
+            Ok(())
+        } else {
+            Err("No global scope available".to_string())
         }
     }
     

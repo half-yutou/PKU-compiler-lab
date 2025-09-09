@@ -1,10 +1,10 @@
 use crate::ast::{Block, BlockItem};
-use crate::lab8::irgen::{FunctionIRGen, IRGen};
+use crate::lab8::irgen::IRGen;
 
-impl<'a> FunctionIRGen<'a> {
+impl IRGen {
     pub fn generate_block(&mut self, block: &Block) -> bool {
         // 进入新的作用域{}
-        self.scope_stack.enter_scope();
+        self.function_irgen.scope_stack.enter_scope();
         
         let mut has_return = false;
         for block_item in &block.block_item_list {
@@ -20,9 +20,7 @@ impl<'a> FunctionIRGen<'a> {
         }
         
         // 退出当前作用域{}
-        self.scope_stack.exit_scope();
+        self.function_irgen.scope_stack.exit_scope();
         has_return
     }
-
-
 }

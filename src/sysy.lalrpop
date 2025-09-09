@@ -12,36 +12,72 @@ match {
   // 关键字
   "if" => "if",
   "else" => "else",
-  "void" => "void",  // 新增void关键字
+  "void" => "void",
+  "const" => "const",
 
   // 剩下的情况采用默认方式处理
   _
 }
 
-// 修改CompUnit以支持多个函数定义
+// 修改CompUnit以支持多个函数定义和全局声明
 pub CompUnit: CompUnit = {
     <items: CompUnitItem+> => CompUnit { items }
 };
 
-// 新增CompUnitItem规则
+// 重构CompUnitItem规则，直接处理歧义
 CompUnitItem: CompUnitItem = {
-    <func_def: FuncDef> => CompUnitItem::FuncDef(func_def),
+    // void 函数定义（无歧义）
+    "void" <id: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
+        CompUnitItem::FuncDef(FuncDef { 
+            func_type: FuncType::Void, 
+            id, 
+            params, 
+            block 
+        })
+    },
+    
+    // int 函数定义（通过括号区分）
+    "int" <id: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
+        CompUnitItem::FuncDef(FuncDef { 
+            func_type: FuncType::Int, 
+            id, 
+            params, 
+            block 
+        })
+    },
+    
+    // int 全局变量声明（通过等号区分）
+    "int" <h: GlobalVarDef> <t: ("," <GlobalVarDef>)*> ";" => {
+        let mut var_def_list = vec![h];  // 修改变量名
+        for item in t {
+            var_def_list.push(item);
+        }
+        CompUnitItem::GlobalDecl(GlobalDecl::Var(GlobalVarDecl { 
+            b_type: "int".to_string(), 
+            var_def_list  // 修改字段名，与AST定义保持一致
+        }))
+    },
+    
+    // 常量声明
+    "const" "int" <h: ConstDef> <t: ("," <ConstDef>)*> ";" => {
+        let mut const_def_list = vec![h];
+        for item in t {
+            const_def_list.push(item);
+        }
+        CompUnitItem::GlobalDecl(GlobalDecl::Const(ConstDecl { 
+            b_type: "int".to_string(), 
+            const_def_list 
+        }))
+    },
 };
 
-// 修改FuncDef以支持函数参数
-FuncDef: FuncDef = {
-    <func_type: FuncType> <id: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
-        FuncDef { func_type, id, params, block }
-    }
-}
+// 全局变量定义规则（初始值可选）
+GlobalVarDef: GlobalVarDef = {
+    <id: Ident> "=" <init_val: InitVal> => GlobalVarDef { ident: id, init_val: Some(init_val) },
+    <id: Ident> => GlobalVarDef { ident: id, init_val: None },
+};
 
-// 修改FuncType以支持void类型
-FuncType: FuncType = {
-    "int" => FuncType::Int,
-    "void" => FuncType::Void,
-}
-
-// 新增函数形参列表规则
+// 函数形参列表规则
 FuncFParams: FuncFParams = {
     <h: FuncFParam> <t: ("," <FuncFParam>)*> => {
         let mut params = vec![h];
@@ -52,12 +88,15 @@ FuncFParams: FuncFParams = {
     }
 };
 
-// 新增单个函数形参规则
+// 函数形参规则
 FuncFParam: FuncFParam = {
-    <b_type: BType> <ident: Ident> => FuncFParam { b_type, ident }
+    "int" <ident: Ident> => FuncFParam { 
+        b_type: "int".to_string(), 
+        ident 
+    }
 };
 
-// 新增函数实参列表规则
+// 函数实参列表规则
 FuncRParams: FuncRParams = {
     <h: Exp> <t: ("," <Exp>)*> => {
         let mut params = vec![h];
@@ -80,19 +119,21 @@ Decl: Decl = {
     <var_decl: VarDecl> => Decl::Var(var_decl),
 }
 
-BType: String = "int" => "int".to_string();
-
+// 局部变量声明（可选初始化）
 VarDecl: VarDecl =  {
-    <b_type: BType> <h: VarDef> <t: ("," <VarDef>)*> ";" => {
+    "int" <h: VarDef> <t: ("," <VarDef>)*> ";" => {
         let mut var_def_list = vec![h];
         for item in t {
             var_def_list.push(item);
         }
-        VarDecl { b_type, var_def_list }
+        VarDecl { 
+            b_type: "int".to_string(), 
+            var_def_list 
+        }
     }
 }
 
-// 可选初始化
+// 局部变量定义（可选初始化）
 VarDef: VarDef = {
     <id:Ident> => VarDef { ident: id, init_val: None },
     <id:Ident> "=" <init_val: InitVal> => VarDef { ident: id, init_val: Some(init_val) },
@@ -100,13 +141,17 @@ VarDef: VarDef = {
 
 InitVal: InitVal = <exp:Exp> => InitVal { exp };
 
+// 常量声明（局部）
 ConstDecl: ConstDecl = {
-    "const" <b_type: BType> <h: ConstDef> <t: ("," <ConstDef>)*> ";" => {
+    "const" "int" <h: ConstDef> <t: ("," <ConstDef>)*> ";" => {
         let mut const_def_list = vec![h];
         for item in t {
             const_def_list.push(item);
         }
-        ConstDecl { b_type, const_def_list }
+        ConstDecl { 
+            b_type: "int".to_string(), 
+            const_def_list 
+        }
     }
 }
 
@@ -194,7 +239,7 @@ MulExp: MulExp = {
 UnaryExp: UnaryExp = {
     <primary_exp: PrimaryExp> => UnaryExp::Primary(primary_exp),
     <unary_op: UnaryOp> <unary_exp: UnaryExp> => UnaryExp::Unary(unary_op, Box::new(unary_exp)),
-    <id: Ident> "(" <params: FuncRParams?> ")" => UnaryExp::FuncCall(id, params),  // 新增函数调用
+    <id: Ident> "(" <params: FuncRParams?> ")" => UnaryExp::FuncCall(id, params),
 }
 
 UnaryOp: UnaryOp = {
@@ -236,11 +281,8 @@ LVal: LVal = <id: Ident> => LVal { ident: id };
 
 Number: i32 = <num: IntConst> => <>;
 
-// 如果匹配到标识符, 就返回这个字符串
-// 一对尖括号在此处指代的是正则表达式匹配到的字符串 (&str)
 Ident: String = r"[_a-zA-Z][_a-zA-Z0-9]*" => <>.to_string();
 
-// 对整数字面量的处理方式: 把匹配到的字符串按对应进制转换成数字
 IntConst: i32 = {
   r"[1-9][0-9]*" => i32::from_str_radix(<>, 10).unwrap(),
   r"0[0-7]*" => i32::from_str_radix(<>, 8).unwrap(),
