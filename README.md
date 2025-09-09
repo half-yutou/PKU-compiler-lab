@@ -11,7 +11,7 @@ doc:https://pku-minic.github.io/online-doc/#/
 - [x] lab5: 语句块和作用域
 - [x] lab6: if语句
 - [x] lab7: while语句
-- [ ] lab8: 函数
+- [x] lab8: 函数与全局变量
 - [ ] lab9: 数组
 
 

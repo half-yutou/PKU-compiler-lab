@@ -152,7 +152,7 @@ impl IRGen {
             GlobalDecl::Const(const_decl) => {
                 for def in &const_decl.const_def_list {
                     let value = self.evaluate_lor_exp(&def.const_init_val.const_exp.lor_exp);
-                    // TODO:这里的命名可能没有考虑到和局部变量重名的情况
+                    // 全局常量不需要考虑和局部常量重名,被作用域shadow了
                     if let Err(err) = self.function_irgen.scope_stack.define(def.ident.clone(), SymbolInfo::Const(value)) {
                         return Err(err);
                     }
@@ -180,7 +180,7 @@ impl IRGen {
                     self.program.set_value_name(global_alloc, Some(global_name));
                     
                     // 将全局变量添加到符号表
-                    // TODO:这里的命名可能没有考虑到和局部变量重名的情况
+                    // 全局变量不需要考虑和局部变量重名,被作用域shadow了
                     if let Err(err) = self.function_irgen.scope_stack.define(def.ident.clone(), SymbolInfo::GlobalVar(global_alloc)) {
                         return Err(err);
                     }

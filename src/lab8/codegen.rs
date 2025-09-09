@@ -5,50 +5,126 @@ use koopa::ir::entities::ValueData;
 
 pub fn generate_riscv_assembly(program: Program) -> String {
     let mut asm = String::new();
+    
+    // 1. 生成数据段（全局变量）
+    let data_section = generate_data_section(&program);
+    if !data_section.is_empty() {
+        asm.push_str(&data_section);
+        asm.push_str("\n");
+    }
+    
+    // 2. 生成代码段
     asm.push_str(".text\n");
     
     for &func_handle in program.func_layout() {
         let func_data = program.func(func_handle);
+        
+        // 跳过函数声明（库函数声明）
+        if func_data.layout().entry_bb().is_none() {
+            continue;
+        }
+        
         let func_name = func_data.name().strip_prefix('@').unwrap_or(func_data.name());
 
         asm.push_str(&format!(".global {}\n", func_name));
         asm.push_str(&format!("{}:\n", func_name));
 
         // 生成函数体汇编
-        let mut generator = AsmGenerator::new();
+        let mut generator = AsmGenerator::new(&program);
         asm.push_str(&generator.gen_function(func_data));
     }
     
     asm
 }
 
-struct AsmGenerator {
+// 生成数据段
+fn generate_data_section(program: &Program) -> String {
+    let mut data_asm = String::new();
+    let mut has_globals = false;
+    
+    // 遍历所有全局值
+    for &value_handle in program.inst_layout() {
+        let value_data = program.borrow_value(value_handle);
+        if let ValueKind::GlobalAlloc(global_alloc) = value_data.kind() {
+            if !has_globals {
+                data_asm.push_str(".data\n");
+                has_globals = true;
+            }
+            
+            // 获取全局变量名
+            let var_name = value_data.name()
+                .as_ref()
+                .unwrap()
+                .strip_prefix('@')
+                .unwrap();
+            
+            // 声明全局符号
+            data_asm.push_str(&format!(".global {}\n", var_name));
+            data_asm.push_str(&format!("{}:\n", var_name));
+            
+            // 生成初始化数据
+            let init_value = global_alloc.init();
+            let init_data = program.borrow_value(init_value);
+            
+            match init_data.kind() {
+                ValueKind::Integer(int_val) => {
+                    // 使用具体的整数值初始化
+                    data_asm.push_str(&format!("  .word {}\n", int_val.value()));
+                }
+                ValueKind::ZeroInit(_) => {
+                    // 零初始化 分配4个字节
+                    data_asm.push_str("  .zero 4\n");
+                }
+                _ => {
+                    // 默认零初始化 分配4个字节
+                    data_asm.push_str("  .zero 4\n");
+                }
+            }
+        }
+    }
+    
+    data_asm
+}
+
+struct AsmGenerator<'a> {
+    program: &'a Program,                   // 添加对Program的引用
     stack_size: i32,                        // 当前栈帧大小
     value_stack_map: HashMap<Value, i32>,   // 中间值 -> 栈偏移映射
     bb_param_stack_map: HashMap<(BasicBlock, usize), i32>, // 基本块参数栈映射
+    is_leaf_function: bool,                 // 是否为叶子函数
 }
 
-impl AsmGenerator {
-    pub fn new() -> Self {
+impl<'a> AsmGenerator<'a> {
+    pub fn new(program: &'a Program) -> Self {
         Self {
+            program,
             stack_size: 0, 
             value_stack_map: HashMap::new(),
             bb_param_stack_map: HashMap::new(),
+            is_leaf_function: true,
         }
     }
     
     pub fn gen_function(&mut self, func_data: &FunctionData) -> String {
         let mut asm = String::new();
         
-        // 1. 计算栈帧大小
+        // 1. 检测是否为叶子函数
+        self.detect_leaf_function(func_data);
+        
+        // 2. 计算栈帧大小
         self.calculate_stack_size(func_data);
 
-        // 2. 生成函数序言(压栈)
+        // 3. 生成函数序言(压栈)
         if self.stack_size > 0 {
             asm.push_str(&format!("  addi  sp, sp, -{}\n", self.stack_size));
+            
+            // 如果不是叶子函数，保存ra寄存器
+            if !self.is_leaf_function {
+                asm.push_str(&format!("  sw    ra, {}(sp)\n", self.stack_size - 4));
+            }
         }
 
-        // 3. 生成基本块和指令
+        // 4. 生成基本块和指令
         let mut is_first_bb = true;
         for (&bb_handle, bb_node) in func_data.layout().bbs() {
             // 第一个基本块不需要额外标签，因为函数名已经是标签
@@ -75,13 +151,33 @@ impl AsmGenerator {
         
         asm
     }
+    
+    // 检测是否为叶子函数（不调用其他函数）
+    fn detect_leaf_function(&mut self, func_data: &FunctionData) {
+        for (&_, bb_node) in func_data.layout().bbs() {
+            for &inst_handle in bb_node.insts().keys() {
+                let value_data = func_data.dfg().value(inst_handle);
+                if matches!(value_data.kind(), ValueKind::Call(_)) {
+                    self.is_leaf_function = false;
+                    return;
+                }
+            }
+        }
+    }
 
     fn calculate_stack_size(&mut self, func_data: &FunctionData) {
         self.stack_size = 0;
         self.value_stack_map.clear();
         self.bb_param_stack_map.clear();
 
-        // 首先处理所有基本块的参数（phi 节点参数）
+        // 首先为函数参数分配栈空间
+        for (_, &param) in func_data.params().iter().enumerate() {
+            let offset = self.stack_size;
+            self.value_stack_map.insert(param, offset);
+            self.stack_size += 4;
+        }
+
+        // 处理所有基本块的参数（phi 节点参数）
         for (&bb_handle, _) in func_data.layout().bbs() {
             let bb_data = func_data.dfg().bb(bb_handle);
             for (i, &param) in bb_data.params().iter().enumerate() {
@@ -116,8 +212,16 @@ impl AsmGenerator {
                         self.value_stack_map.insert(inst_handle, offset);
                         self.stack_size += 4;
                     },
-                    ValueKind::Integer(_) => {
-                        // 常量不需要栈空间，可以直接用 li 指令或 x0 寄存器
+                    ValueKind::Call(_) => {
+                        // 函数调用结果分配（如果有返回值）
+                        if !matches!(value_data.ty().kind(), koopa::ir::TypeKind::Unit) {
+                            let offset = self.stack_size;
+                            self.value_stack_map.insert(inst_handle, offset);
+                            self.stack_size += 4;
+                        }
+                    },
+                    ValueKind::Integer(_) | ValueKind::FuncArgRef(_) => {
+                        // 常量和函数参数不需要额外栈空间
                     },
                     ValueKind::Return(_) | ValueKind::Store(_) | ValueKind::Branch(_) | ValueKind::Jump(_) => {
                         // 这些指令不产生需要存储的值
@@ -130,6 +234,11 @@ impl AsmGenerator {
                     }
                 }
             }
+        }
+
+        // 如果不是叶子函数，需要额外空间保存ra寄存器
+        if !self.is_leaf_function {
+            self.stack_size += 4;
         }
 
         // 16字节对齐
@@ -145,10 +254,14 @@ impl AsmGenerator {
                 // 常量数字的加载不需要具体指令，在load_value_to_reg调用时会生成将数字加载到寄存器的指令
                 String::new()
             }
+            ValueKind::FuncArgRef(_) => {
+                // 函数参数引用不需要生成指令
+                // 参数值在函数入口处已经通过寄存器或栈传递
+                String::new()
+            }
             ValueKind::BlockArgRef(_) => {
                 // 基本块参数引用不需要生成指令
                 // 参数值已经通过跳转时的寄存器传递或栈传递
-                // 这里只需要确保参数在栈映射中有正确的位置
                 String::new()
             }
             ValueKind::Binary(binary) => {
@@ -204,12 +317,69 @@ impl AsmGenerator {
 
                 asm
             }
+            ValueKind::Call(call) => {
+                let mut asm = String::new();
+                
+                // 获取被调用函数的句柄和参数
+                let callee = call.callee();
+                let args = call.args();
+                
+                // 通过program获取被调用函数的名称
+                let callee_data = self.program.func(callee);
+                let func_name = callee_data.name().strip_prefix('@').unwrap_or(callee_data.name());
+                
+                // 准备参数
+                // 前8个参数通过a0-a7寄存器传递
+                for (i, &arg) in args.iter().enumerate().take(8) {
+                    asm.push_str(&self.load_value_to_reg(arg, &format!("a{}", i), dfg));
+                }
+                
+                // 第9个及以后的参数通过栈传递（从右到左压栈）
+                if args.len() > 8 {
+                    let stack_args = &args[8..];
+                    let stack_space = ((stack_args.len() * 4 + 15) / 16) * 16; // 16字节对齐
+                    
+                    // 调整栈指针为栈参数分配空间
+                    asm.push_str(&format!("  addi  sp, sp, -{}\n", stack_space));
+                    
+                    // 从右到左压栈（最后一个参数先压栈）
+                    for (i, &arg) in stack_args.iter().enumerate().rev() {
+                        asm.push_str(&self.load_value_to_reg(arg, "t0", dfg));
+                        let offset = i * 4;
+                        asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                    }
+                }
+                
+                // 调用函数
+                asm.push_str(&format!("  call  {}\n", func_name));
+                
+                // 恢复栈指针（如果有栈参数）
+                if args.len() > 8 {
+                    let stack_args = &args[8..];
+                    let stack_space = ((stack_args.len() * 4 + 15) / 16) * 16;
+                    asm.push_str(&format!("  addi  sp, sp, {}\n", stack_space));
+                }
+                
+                // 如果函数有返回值，将a0的值保存到栈
+                if !matches!(value_data.ty().kind(), koopa::ir::TypeKind::Unit) {
+                    if let Some(&offset) = self.value_stack_map.get(&inst_handle) {
+                        asm.push_str(&format!("  sw    a0, {}(sp)\n", offset));
+                    }
+                }
+                
+                asm
+            }
             ValueKind::Return(ret) => {
                 let mut asm = String::new();
 
                 // 如果有返回值，将其加载到a0寄存器
                 if let Some(return_value) = ret.value() {
                     asm.push_str(&self.load_value_to_reg(return_value, "a0", dfg));
+                }
+
+                // 恢复ra寄存器（如果不是叶子函数）
+                if !self.is_leaf_function && self.stack_size > 0 {
+                    asm.push_str(&format!("  lw    ra, {}(sp)\n", self.stack_size - 4));
                 }
 
                 // 恢复栈指针
@@ -260,25 +430,47 @@ impl AsmGenerator {
             ValueKind::Store(store) => {
                 let mut asm = String::new();
 
-                // 将要存储的值加载到临时寄存器t0
+                // 先加载要存储的值到t0
                 asm.push_str(&self.load_value_to_reg(store.value(), "t0", dfg));
 
-                // 获取目标地址到临时寄存器t1
-                let dest_value_data = dfg.value(store.dest());
-                match dest_value_data.kind() {
-                    ValueKind::Alloc(_) => {
-                        // 目标是Alloc分配的栈地址
-                        if let Some(&offset) = self.value_stack_map.get(&store.dest()) {
-                            // 直接存储到栈偏移位置
-                            asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
-                        } else {
-                            panic!("Alloc destination not found in stack map: {:?}", store.dest());
+                // 检查目标是否为全局变量
+                if dfg.values().contains_key(&store.dest()) {
+                    // 局部变量（在函数 dfg 中）
+                    let dest_value_data = dfg.value(store.dest());
+                    match dest_value_data.kind() {
+                        ValueKind::Alloc(_) => {
+                            // 目标是Alloc分配的栈地址，直接存储到栈偏移位置
+                            if let Some(&offset) = self.value_stack_map.get(&store.dest()) {
+                                asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                            } else {
+                                panic!("Alloc destination not found in stack map: {:?}", store.dest());
+                            }
+                        },
+                        _ => {
+                            // 其他类型的地址，先加载地址到t1，再存储
+                            asm.push_str(&self.load_value_to_reg(store.dest(), "t1", dfg));
+                            asm.push_str("  sw    t0, 0(t1)\n");
                         }
-                    },
-                    _ => {
-                        // 其他类型的地址，先加载地址到t1，再存储
-                        asm.push_str(&self.load_value_to_reg(store.dest(), "t1", dfg));
-                        asm.push_str("  sw    t0, 0(t1)\n");
+                    }
+                } else {
+                    // 全局变量（不在函数 dfg 中）
+                    let dest_value_ref = self.program.borrow_value(store.dest());
+                    match dest_value_ref.kind() {
+                        ValueKind::GlobalAlloc(_) => {
+                            // 目标是全局变量，使用la指令加载地址，然后sw存储值
+                            let var_name = dest_value_ref.name()
+                                .as_ref()
+                                .unwrap()
+                                .strip_prefix('@')
+                                .unwrap();
+                            asm.push_str(&format!("  la    t1, {}\n", var_name));
+                            asm.push_str("  sw    t0, 0(t1)\n");
+                        },
+                        _ => {
+                            // 其他类型的地址，先加载地址到t1，再存储
+                            asm.push_str(&self.load_value_to_reg(store.dest(), "t1", dfg));
+                            asm.push_str("  sw    t0, 0(t1)\n");
+                        }
                     }
                 }
 
@@ -287,21 +479,44 @@ impl AsmGenerator {
             ValueKind::Load(load) => {
                 let mut asm = String::new();
 
-                // 获取源地址
-                let src_value_data = dfg.value(load.src());
-                match src_value_data.kind() {
-                    ValueKind::Alloc(_) => {
-                        // 源是Alloc分配的栈地址，直接从栈加载
-                        if let Some(&src_offset) = self.value_stack_map.get(&load.src()) {
-                            asm.push_str(&format!("  lw    t0, {}(sp)\n", src_offset));
-                        } else {
-                            panic!("Alloc source not found in stack map: {:?}", load.src());
+                // 检查源是否为全局变量
+                if dfg.values().contains_key(&load.src()) {
+                    // 局部变量（在函数 dfg 中）
+                    let src_value_data = dfg.value(load.src());
+                    match src_value_data.kind() {
+                        ValueKind::Alloc(_) => {
+                            // 源是Alloc分配的栈地址，直接从栈加载
+                            if let Some(&src_offset) = self.value_stack_map.get(&load.src()) {
+                                asm.push_str(&format!("  lw    t0, {}(sp)\n", src_offset));
+                            } else {
+                                panic!("Alloc source not found in stack map: {:?}", load.src());
+                            }
+                        },
+                        _ => {
+                            // 其他类型的地址，先加载地址到t1，再从该地址加载值
+                            asm.push_str(&self.load_value_to_reg(load.src(), "t1", dfg));
+                            asm.push_str("  lw    t0, 0(t1)\n");
                         }
-                    },
-                    _ => {
-                        // 其他类型的地址，先加载地址到t1，再从该地址加载值
-                        asm.push_str(&self.load_value_to_reg(load.src(), "t1", dfg));
-                        asm.push_str("  lw    t0, 0(t1)\n");
+                    }
+                } else {
+                    // 全局变量（不在函数 dfg 中）
+                    let src_value_ref = self.program.borrow_value(load.src());
+                    match src_value_ref.kind() {
+                        ValueKind::GlobalAlloc(_) => {
+                            // 源是全局变量，使用la指令加载地址，然后lw加载值
+                            let var_name = src_value_ref.name()
+                                .as_ref()
+                                .unwrap()
+                                .strip_prefix('@')
+                                .unwrap();
+                            asm.push_str(&format!("  la    t1, {}\n", var_name));
+                            asm.push_str("  lw    t0, 0(t1)\n");
+                        },
+                        _ => {
+                            // 其他类型的地址，先加载地址到t1，再从该地址加载值
+                            asm.push_str(&self.load_value_to_reg(load.src(), "t1", dfg));
+                            asm.push_str("  lw    t0, 0(t1)\n");
+                        }
                     }
                 }
 
@@ -327,6 +542,18 @@ impl AsmGenerator {
                     format!("  mv    {}, x0\n", target_reg)
                 } else {
                     format!("  li    {}, {}\n", target_reg, i.value())
+                }
+            },
+            ValueKind::FuncArgRef(arg_ref) => {
+                let arg_index = arg_ref.index();
+                if arg_index < 8 {
+                    // 前8个参数通过a0-a7寄存器传递
+                    format!("  mv    {}, a{}\n", target_reg, arg_index)
+                } else {
+                    // 第9个及以后的参数从栈中获取
+                    // 参数在调用者栈帧中，需要计算正确的偏移
+                    let offset = self.stack_size + (arg_index as i32 - 8) * 4;
+                    format!("  lw    {}, {}(sp)\n", target_reg, offset)
                 }
             },
             _ => {
