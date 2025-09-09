@@ -9,9 +9,9 @@
 //!                         └── UnaryExp (一元运算 + - !)
 //!                             └── PrimaryExp (最高优先级)
 //! ```
-use crate::lab8::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
-use crate::lab8::irgen::symbol::SymbolInfo;
-use crate::lab8::irgen::IRGen;
+use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
+use crate::lab9::irgen::symbol::SymbolInfo;
+use crate::lab9::irgen::IRGen;
 
 impl IRGen {
     pub fn evaluate_exp(&self, exp: &Exp) -> i32 {

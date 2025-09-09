@@ -1,7 +1,7 @@
 use koopa::ir::{BasicBlock, Function, FunctionData, Program, Type, TypeKind, Value};
 use koopa::ir::builder::{BasicBlockBuilder, GlobalInstBuilder, LocalInstBuilder, ValueBuilder};
-use crate::lab8::ast::{CompUnit, CompUnitItem, FuncDef, FuncType, GlobalDecl};
-use crate::lab8::irgen::symbol::{ScopeStack, SymbolInfo};
+use crate::ast::{CompUnit, CompUnitItem, FuncDef, FuncType, GlobalDecl};
+use crate::lab9::irgen::symbol::{ScopeStack, SymbolInfo};
 use std::collections::HashMap;
 
 /// 控制流上下文，用于跟踪嵌套的if-else结构

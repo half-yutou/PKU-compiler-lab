@@ -1,5 +1,5 @@
-use crate::lab8::ast::{Block, BlockItem};
-use crate::lab8::irgen::IRGen;
+use crate::ast::{Block, BlockItem};
+use crate::lab9::irgen::IRGen;
 
 impl IRGen {
     pub fn generate_block(&mut self, block: &Block) -> bool {

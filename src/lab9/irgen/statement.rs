@@ -1,7 +1,7 @@
-use crate::lab8::ast::Stmt;
+use crate::ast::Stmt;
 
-use crate::lab8::irgen::symbol::SymbolInfo;
-use crate::lab8::irgen::{ControlFlowType, IRGen, LoopContext};
+use crate::lab9::irgen::symbol::SymbolInfo;
+use crate::lab9::irgen::{ControlFlowType, IRGen, LoopContext};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder};
 
 impl IRGen {
