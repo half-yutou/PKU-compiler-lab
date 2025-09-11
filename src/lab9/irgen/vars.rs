@@ -368,10 +368,10 @@ impl IRGen {
                  let func_data = self.function_data_mut();
                  
                  // 调试输出：打印函数名和参数类型
-                 eprintln!("DEBUG: Calling function '{}' with {} args", func_name, args.len());
+                 println!("DEBUG: Calling function '{}' with {} args", func_name, args.len());
                  for (i, &arg) in args.iter().enumerate() {
                      let arg_type = func_data.dfg().value(arg).ty();
-                     eprintln!("DEBUG: Arg {}: {:?}", i, arg_type);
+                     println!("DEBUG: Arg {}: {:?}", i, arg_type);
                  }
                  
                  let call_inst = func_data.dfg_mut().new_value().call(function_handler, args);
@@ -438,7 +438,7 @@ impl IRGen {
             }
 
             // region 数组访问
-            Some(SymbolInfo::LocalConstArray(ptr, _)) | 
+            Some(SymbolInfo::LocalConstArray(ptr, _)) |
             Some(SymbolInfo::GlobalConstArray(ptr, _)) |
             Some(SymbolInfo::LocalArray(ptr, _)) |
             Some(SymbolInfo::GlobalArray(ptr, _)) => {
@@ -476,17 +476,17 @@ impl IRGen {
                 // 解引用局部变量，得到真正的指针**i32 -> *i32
                 let loaded_ptr = func_data.dfg_mut().new_value().load(param_ptr);
                 func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(loaded_ptr).unwrap();
-                
+
                 // 从参数指针开始逐层解开
                 let mut current_ptr = loaded_ptr;
-                
+
                 for (i, &index) in indexes.iter().enumerate() {
                     let param_type = func_data.dfg().value(current_ptr).ty().clone();
-                    println!("Debug: i = {}, current_ptr_type = {}", i, param_type);
+                    println!("Debug: loading: i = {}, current_ptr_type = {}", i, param_type);
                     if i == 0 {
                         // 第一层：对指针类型使用 getptr
                         // loaded_ptr 类型是 *[i32, 3], 使用 getptr 进行指针算术
-                        
+
                         current_ptr = func_data.dfg_mut().new_value().get_ptr(current_ptr, index);
                         func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
                     } else {
@@ -495,7 +495,7 @@ impl IRGen {
                         func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
                     }
                 }
-                
+
                 // 最后加载目标值
                 let load_inst = func_data.dfg_mut().new_value().load(current_ptr);
                 func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(load_inst).unwrap();
@@ -505,10 +505,10 @@ impl IRGen {
             None => panic!("Identifier '{}' not found", lval.ident),
         }
     }
-    
+
     pub fn generate_lval_store(&mut self, lval: &LVal, value: Value) {
         let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
-        
+
         match symbol_info {
             // 常量不可变
             Some(SymbolInfo::Const(_)) |
@@ -526,7 +526,7 @@ impl IRGen {
                 let store_inst = func_data.dfg_mut().new_value().store(value, ptr);
                 func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
             }
-            
+
             // 变量数组赋值
             Some(SymbolInfo::LocalArray(ptr, _dimensions)) | Some(SymbolInfo::GlobalArray(ptr, _dimensions)) => {
                 if lval.indices.is_empty() {
@@ -540,7 +540,6 @@ impl IRGen {
                 func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
             }
 
-            // TODO: 函数数组参数赋值
             Some(SymbolInfo::ParamArray(param_ptr, _dimensions)) => {
                 if lval.indices.is_empty() {
                     panic!("Cannot assign to entire parameter array '{}'", lval.ident);
@@ -591,7 +590,7 @@ impl IRGen {
         }
     }
 
-    fn generate_array_access_ptr(&mut self, base_ptr: Value, indices: &[Exp]) -> Value {
+    pub fn generate_array_access_ptr(&mut self, base_ptr: Value, indices: &[Exp]) -> Value {
         let mut ptr = base_ptr;
 
         // 逐级处理每个索引

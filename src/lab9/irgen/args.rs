@@ -21,8 +21,8 @@ impl IRGen {
                         // 数组传参：返回数组首地址
                         self.generate_lval_as_param(&lval)
                     } else {
-                        // 数组访问：返回具体元素值
-                        self.generate_lval_load(&lval)
+                        // 数组访问作为参数：需要判断是否为子数组传参
+                        self.generate_lval_as_arg(&lval)
                     }
                 }
 
@@ -46,8 +46,108 @@ impl IRGen {
             }
         }
 
-        // 情况4：普通表达式（非LVal）
+        // 如果不是 LVal，按普通表达式处理
         self.generate_exp(exp)
+    }
+
+    // 处理数组访问作为参数的情况
+    pub fn generate_lval_as_arg(&mut self, lval: &LVal) -> Value {
+        let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
+        
+        match symbol_info {
+            Some(SymbolInfo::LocalConstArray(ptr, dimensions)) |
+            Some(SymbolInfo::GlobalConstArray(ptr, dimensions)) |
+            Some(SymbolInfo::LocalArray(ptr, dimensions)) |
+            Some(SymbolInfo::GlobalArray(ptr, dimensions)) => {
+                // 检查访问后的维度
+                let remaining_dims = dimensions.len() - lval.indices.len();
+                
+                if remaining_dims > 1 {
+                    // 剩余维度大于1，需要降维处理
+                    let array_ptr = self.generate_array_access_ptr(ptr, &lval.indices);
+                    let current_bb = self.current_bb();
+                    let func_data = self.function_data_mut();
+                    let zero = func_data.dfg_mut().new_value().integer(0);
+                    let first_elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(array_ptr, zero);
+                    func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(first_elem_ptr).unwrap();
+                    first_elem_ptr
+                } else if remaining_dims == 1 {
+                    // 剩余维度等于1，返回子数组首元素指针
+                    let array_ptr = self.generate_array_access_ptr(ptr, &lval.indices);
+                    let current_bb = self.current_bb();
+                    let func_data = self.function_data_mut();
+                    let zero = func_data.dfg_mut().new_value().integer(0);
+                    let first_elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(array_ptr, zero);
+                    func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(first_elem_ptr).unwrap();
+                    first_elem_ptr
+                } else {
+                    // 没有剩余维度，返回标量值
+                    self.generate_lval_load(lval)
+                }
+            }
+            
+            Some(SymbolInfo::ParamArray(param_ptr, dimensions)) => {
+                // 检查访问后的维度
+                let remaining_dims = dimensions.len() - lval.indices.len();
+                
+                if remaining_dims > 1 {
+                    // 剩余维度大于1，需要降维处理
+                    let array_ptr = self.generate_param_array_access_ptr(param_ptr, &lval.indices);
+                    let current_bb = self.current_bb();
+                    let func_data = self.function_data_mut();
+                    let zero = func_data.dfg_mut().new_value().integer(0);
+                    let first_elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(array_ptr, zero);
+                    func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(first_elem_ptr).unwrap();
+                    first_elem_ptr
+                } else if remaining_dims == 1 {
+                    // 剩余维度等于1，返回子数组首元素指针
+                    let array_ptr = self.generate_param_array_access_ptr(param_ptr, &lval.indices);
+                    let current_bb = self.current_bb();
+                    let func_data = self.function_data_mut();
+                    let zero = func_data.dfg_mut().new_value().integer(0);
+                    let first_elem_ptr = func_data.dfg_mut().new_value().get_elem_ptr(array_ptr, zero);
+                    func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(first_elem_ptr).unwrap();
+                    first_elem_ptr
+                } else {
+                    // 没有剩余维度，返回标量值
+                    self.generate_lval_load(lval)
+                }
+            }
+            
+            _ => {
+                // 非数组类型，直接加载值
+                self.generate_lval_load(lval)
+            }
+        }
+    }
+    
+    // 处理参数数组的访问，返回指针而不是值
+    pub fn generate_param_array_access_ptr(&mut self, param_ptr: Value, indices: &[crate::ast::Exp]) -> Value {
+        // 先计算所有索引值
+        let index_values: Vec<Value> = indices.iter().map(|exp| self.generate_exp(exp)).collect();
+        
+        let current_bb = self.current_bb();
+        let func_data = self.function_data_mut();
+        
+        // 先加载参数指针
+        let loaded_ptr = func_data.dfg_mut().new_value().load(param_ptr);
+        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(loaded_ptr).unwrap();
+        
+        let mut current_ptr = loaded_ptr;
+        
+        // 处理索引
+        for (i, &index) in index_values.iter().enumerate() {
+            if i == 0 {
+                // 第一层使用 getptr
+                current_ptr = func_data.dfg_mut().new_value().get_ptr(current_ptr, index);
+            } else {
+                // 后续层使用 getelemptr
+                current_ptr = func_data.dfg_mut().new_value().get_elem_ptr(current_ptr, index);
+            }
+            func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
+        }
+        
+        current_ptr
     }
 
     // 处理数组作为参数传递时返回数组首地址
