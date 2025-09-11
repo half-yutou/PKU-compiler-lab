@@ -161,9 +161,9 @@ impl IRGen {
             GlobalDecl::Var(var_decl) => {
                 for def in &var_decl.var_def_list {
                     let global_name = format!("@{}", def.ident);
-                    
+
                     // 创建初始化值
-                    let init_ir = match &def.init_val { 
+                    let init_ir = match &def.init_val {
                         Some(init_val) => {
                             // 如果有初始化值，计算表达式的值
                             let init_val = self.evaluate_exp(&init_val.exp);
@@ -174,7 +174,7 @@ impl IRGen {
                             self.program.new_value().zero_init(Type::get_i32())
                         }
                     };
-                    
+
                     // 创建全局变量
                     let global_alloc = self.program.new_value().global_alloc(init_ir);
                     self.program.set_value_name(global_alloc, Some(global_name));
@@ -205,7 +205,7 @@ impl IRGen {
         
         Ok(())
     }
-    
+
     /// 生成函数体
     fn generate_function_body(&mut self, func_def: &FuncDef) -> Result<(), String> {
         // 进入函数作用域
@@ -286,7 +286,7 @@ impl IRGen {
     fn current_bb(&self) -> BasicBlock {
         self.function_irgen.current_bb.unwrap()
     }
-    
+
     /// 推入控制流上下文到栈中
     pub fn push_control_flow(&mut self, end_bb: BasicBlock, context_type: ControlFlowType) {
         self.function_irgen.control_flow_stack.push(ControlFlowContext {

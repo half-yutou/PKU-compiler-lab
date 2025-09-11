@@ -1,12 +1,22 @@
 use std::collections::HashMap;
 use koopa::ir::Value;
 
-/// 符号信息：区分常量、局部变量和全局变量
+/// 符号信息：区分常量、局部变量、全局变量和数组
 #[derive(Debug, Clone)]
 pub enum SymbolInfo {
-    Const(i32),           // 常量：直接存储值
-    Var(Value),           // 局部变量：存储 alloc 返回的指针
-    GlobalVar(Value),     // 全局变量：存储 global_alloc 返回的指针
+    Const(i32),                          // 全局/局部 常量
+    Var(Value),                          // 局部变量
+    GlobalVar(Value),                    // 全局变量
+
+    // 局部数组
+    LocalConstArray(Value, Vec<usize>),  // 局部常量数组：存储值和维度
+    LocalArray(Value, Vec<usize>),          // 局部变量数组
+
+    // 全局数组  
+    GlobalConstArray(Value, Vec<usize>), // 全局常量数组：存储值和维度
+    GlobalArray(Value, Vec<usize>),         // 全局变量数组
+    
+    ParamArray(Value, Vec<usize>),       // 函数参数数组
 }
 
 // 作用域栈：支持嵌套作用域的符号表

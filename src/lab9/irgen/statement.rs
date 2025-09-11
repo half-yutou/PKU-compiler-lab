@@ -1,6 +1,5 @@
 use crate::ast::Stmt;
 
-use crate::lab9::irgen::symbol::SymbolInfo;
 use crate::lab9::irgen::{ControlFlowType, IRGen, LoopContext};
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder};
 
@@ -239,23 +238,8 @@ impl IRGen {
                 // 根据右侧表达式求值
                 let value = self.generate_exp(exp);
                 
-                // 获取左值的指针
-                let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
-                match symbol_info {
-                    Some(SymbolInfo::Var(ptr)) | Some(SymbolInfo::GlobalVar(ptr))=> {
-                        let current_bb = self.current_bb();
-                        let func_data = self.function_data_mut();
-                        // 生成 store 指令
-                        let store_inst = func_data.dfg_mut().new_value().store(value, ptr);
-                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
-                    }
-                    Some(SymbolInfo::Const(_)) => {
-                        panic!("Cannot assign to constant '{}'!", lval.ident);
-                    }
-                    None => {
-                        panic!("Variable '{}' not found!", lval.ident);
-                    }
-                }
+                // 生成左值的存储指令
+                self.generate_lval_store(lval, value);
                 false
             }
             

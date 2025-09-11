@@ -48,13 +48,13 @@ CompUnitItem: CompUnitItem = {
     
     // int 全局变量声明（通过等号区分）
     "int" <h: GlobalVarDef> <t: ("," <GlobalVarDef>)*> ";" => {
-        let mut var_def_list = vec![h];  // 修改变量名
+        let mut var_def_list = vec![h];
         for item in t {
             var_def_list.push(item);
         }
         CompUnitItem::GlobalDecl(GlobalDecl::Var(GlobalVarDecl { 
             b_type: "int".to_string(), 
-            var_def_list  // 修改字段名，与AST定义保持一致
+            var_def_list
         }))
     },
     
@@ -71,10 +71,22 @@ CompUnitItem: CompUnitItem = {
     },
 };
 
-// 全局变量定义规则（初始值可选）
+// 全局变量定义规则（支持数组维度）
 GlobalVarDef: GlobalVarDef = {
-    <id: Ident> "=" <init_val: InitVal> => GlobalVarDef { ident: id, init_val: Some(init_val) },
-    <id: Ident> => GlobalVarDef { ident: id, init_val: None },
+    <id: Ident> <dims: ("[" <ConstExp> "]")*> "=" <init_val: InitVal> => {
+        GlobalVarDef { 
+            ident: id, 
+            dimensions: dims,
+            init_val: Some(init_val) 
+        }
+    },
+    <id: Ident> <dims: ("[" <ConstExp> "]")*> => {
+        GlobalVarDef { 
+            ident: id, 
+            dimensions: dims,
+            init_val: None 
+        }
+    },
 };
 
 // 函数形参列表规则
@@ -88,11 +100,27 @@ FuncFParams: FuncFParams = {
     }
 };
 
-// 函数形参规则
+// 函数形参规则（支持数组参数）
 FuncFParam: FuncFParam = {
-    "int" <ident: Ident> => FuncFParam { 
-        b_type: "int".to_string(), 
-        ident 
+    // 普通参数
+    "int" <ident: Ident> => {
+        FuncFParam { 
+            b_type: "int".to_string(), 
+            ident,
+            dimensions: vec![]
+        }
+    },
+    // 数组参数，第一维为空
+    "int" <ident: Ident> "[" "]" <dims: ("[" <ConstExp> "]")*> => {
+        let mut dimensions = vec![None]; // 第一维为None表示不定长
+        for dim in dims {
+            dimensions.push(Some(dim));
+        }
+        FuncFParam { 
+            b_type: "int".to_string(), 
+            ident,
+            dimensions
+        }
     }
 };
 
@@ -119,7 +147,7 @@ Decl: Decl = {
     <var_decl: VarDecl> => Decl::Var(var_decl),
 }
 
-// 局部变量声明（可选初始化）
+// 局部变量声明（支持数组）
 VarDecl: VarDecl =  {
     "int" <h: VarDef> <t: ("," <VarDef>)*> ";" => {
         let mut var_def_list = vec![h];
@@ -133,13 +161,36 @@ VarDecl: VarDecl =  {
     }
 }
 
-// 局部变量定义（可选初始化）
+// 局部变量定义（支持数组维度）
 VarDef: VarDef = {
-    <id:Ident> => VarDef { ident: id, init_val: None },
-    <id:Ident> "=" <init_val: InitVal> => VarDef { ident: id, init_val: Some(init_val) },
+    <id: Ident> <dims: ("[" <ConstExp> "]")*> => {
+        VarDef { 
+            ident: id, 
+            dimensions: dims,
+            init_val: None 
+        }
+    },
+    <id: Ident> <dims: ("[" <ConstExp> "]")*> "=" <init_val: InitVal> => {
+        VarDef { 
+            ident: id, 
+            dimensions: dims,
+            init_val: Some(init_val) 
+        }
+    },
 }
 
-InitVal: InitVal = <exp:Exp> => InitVal { exp };
+// 初始化值（支持数组初始化列表）
+InitVal: InitVal = {
+    <exp: Exp> => InitVal::Exp(exp),
+    "{" "}" => InitVal::List(vec![]),
+    "{" <h: InitVal> <t: ("," <InitVal>)*> "}" => {
+        let mut list = vec![h];
+        for item in t {
+            list.push(item);
+        }
+        InitVal::List(list)
+    }
+};
 
 // 常量声明（局部）
 ConstDecl: ConstDecl = {
@@ -155,9 +206,29 @@ ConstDecl: ConstDecl = {
     }
 }
 
-ConstDef: ConstDef = <id:Ident> "=" <const_init_val:ConstInitVal> => ConstDef { ident: id, const_init_val };
+// 常量定义（支持数组维度）
+ConstDef: ConstDef = {
+    <id: Ident> <dims: ("[" <ConstExp> "]")*> "=" <const_init_val: ConstInitVal> => {
+        ConstDef { 
+            ident: id, 
+            dimensions: dims,
+            const_init_val 
+        }
+    }
+};
 
-ConstInitVal: ConstInitVal = <exp:ConstExp> => ConstInitVal { const_exp: exp };
+// 常量初始化值（支持数组初始化列表）
+ConstInitVal: ConstInitVal = {
+    <exp: ConstExp> => ConstInitVal::Exp(exp),
+    "{" "}" => ConstInitVal::List(vec![]),
+    "{" <h: ConstInitVal> <t: ("," <ConstInitVal>)*> "}" => {
+        let mut list = vec![h];
+        for item in t {
+            list.push(item);
+        }
+        ConstInitVal::List(list)
+    }
+};
 
 ConstExp: ConstExp = <exp: LOrExp> => ConstExp { lor_exp: exp };
 
@@ -277,7 +348,15 @@ PrimaryExp: PrimaryExp = {
     <lval: LVal> => PrimaryExp::LVal(lval),
 }
 
-LVal: LVal = <id: Ident> => LVal { ident: id };
+// 修改LVal以支持数组访问
+LVal: LVal = {
+    <id: Ident> <indices: ("[" <Exp> "]")*> => {
+        LVal { 
+            ident: id, 
+            indices 
+        }
+    }
+};
 
 Number: i32 = <num: IntConst> => <>;
 

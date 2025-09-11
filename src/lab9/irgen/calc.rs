@@ -130,9 +130,22 @@ impl IRGen {
             PrimaryExp::Paren(exp) => self.evaluate_exp(exp),
             PrimaryExp::LVal(lval) => {
                 match self.function_irgen.scope_stack.lookup(&lval.ident) {
-                    Some(SymbolInfo::Const(value)) => *value,
+                    Some(SymbolInfo::Const(value)) => {
+                        if !lval.indices.is_empty() {
+                            panic!("Cannot index into scalar constant '{}'", lval.ident);
+                        }
+                        *value
+                    }
+                    
                     Some(SymbolInfo::Var(_)) => panic!("Cannot use variable '{}' in constant expression", lval.ident),
                     Some(SymbolInfo::GlobalVar(_)) => panic!("Cannot use global variable '{}' in constant expression", lval.ident),
+                    
+                    Some(SymbolInfo::LocalConstArray(_, _)) => panic!("Cannot use local constant array '{}' in constant expression", lval.ident),
+                    Some(SymbolInfo::GlobalConstArray(_, _)) => panic!("Cannot use global constant array '{}' in constant expression", lval.ident),
+                    Some(SymbolInfo::LocalArray(_, _)) => panic!("Cannot use array '{}' in constant expression", lval.ident),
+                    Some(SymbolInfo::GlobalArray(_, _)) => panic!("Cannot use global array '{}' in constant expression", lval.ident),
+                    Some(SymbolInfo::ParamArray(_, _)) => panic!("Cannot use parameter array '{}' in constant expression", lval.ident),
+                    
                     None => panic!("Identifier '{}' not found", lval.ident),
                 }
             }

@@ -38,7 +38,7 @@ impl GenAssembly for FunctionData {
         asm.push_str(&format!("{}:\n", func_name));
         
         // 遍历所有基本块
-        for (&bb_handle, bb_node) in self.layout().bbs() {
+        for (_, bb_node) in self.layout().bbs() {
             // 从布局中获取基本块的指令列表
             for &inst_handle in bb_node.insts().keys() {
                 let inst_data = self.dfg().value(inst_handle);

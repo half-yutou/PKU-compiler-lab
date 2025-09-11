@@ -243,10 +243,4 @@ pub enum EqOp {
     Ne,  // !=
 }
 
-#[derive(Debug)]
-pub enum LogicOp {
-    Or,  // ||
-    And, // &&
-}
-
 // endregion 表达式

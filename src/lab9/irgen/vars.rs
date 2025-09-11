@@ -9,7 +9,8 @@
 //!                         └── UnaryExp (一元运算 + - !)
 //!                             └── PrimaryExp (最高优先级)
 //! ```
-use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
+
+use crate::ast::{AddExp, EqExp, EqOp, Exp, LAndExp, LOrExp, LVal, MulDivOp, MulExp, PlusSubOp, PrimaryExp, RelExp, RelOp, UnaryExp, UnaryOp};
 use crate::lab9::irgen::symbol::SymbolInfo;
 use crate::lab9::irgen::IRGen;
 use koopa::ir::builder::{BasicBlockBuilder, LocalInstBuilder, ValueBuilder};
@@ -357,17 +358,24 @@ impl IRGen {
                 let mut args = Vec::new();
                 if let Some(func_params) = params {
                     for param_exp in &func_params.params {
-                        let arg_value = self.generate_exp(param_exp);
+                        let arg_value = self.generate_arg_exp(param_exp);
                         args.push(arg_value);
                     }
                 }
                 
                 // 生成函数调用指令
-                let current_bb = self.current_bb();
-                let func_data = self.function_data_mut();
-                
-                let call_inst = func_data.dfg_mut().new_value().call(function_handler, args);
-                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(call_inst).unwrap();
+                 let current_bb = self.current_bb();
+                 let func_data = self.function_data_mut();
+                 
+                 // 调试输出：打印函数名和参数类型
+                 eprintln!("DEBUG: Calling function '{}' with {} args", func_name, args.len());
+                 for (i, &arg) in args.iter().enumerate() {
+                     let arg_type = func_data.dfg().value(arg).ty();
+                     eprintln!("DEBUG: Arg {}: {:?}", i, arg_type);
+                 }
+                 
+                 let call_inst = func_data.dfg_mut().new_value().call(function_handler, args);
+                 func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(call_inst).unwrap();
                 
                 call_inst
             }
@@ -396,37 +404,212 @@ impl IRGen {
     }
 
     fn generate_primary_exp(&mut self, primary: &PrimaryExp) -> Value {
-        let current_bb = self.current_bb();
-
         match primary {
             PrimaryExp::Number(num) => {
                 let func_data = self.function_data_mut();
-
                 func_data.dfg_mut().new_value().integer(*num)
             },
             PrimaryExp::Paren(exp) => self.generate_exp(exp),
-            PrimaryExp::LVal(lval) => {
-                let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
-                match symbol_info {
-                    Some(SymbolInfo::Const(value)) => {
-                        let func_data = self.function_data_mut();
+            PrimaryExp::LVal(lval) => self.generate_lval_load(lval),
+        }
+    }
+    
+    // 左值被调用时，返回其对应值的ptr
+    pub fn generate_lval_load(&mut self, lval: &LVal) -> Value {
+        let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
+        
+        match symbol_info {
+            Some(SymbolInfo::Const(value)) => {
+                if !lval.indices.is_empty() {
+                    panic!("Cannot index into scalar constant");
+                }
+                let func_data = self.function_data_mut();
+                func_data.dfg_mut().new_value().integer(value)
+            }
+            Some(SymbolInfo::Var(ptr)) | Some(SymbolInfo::GlobalVar(ptr)) => {
+                if !lval.indices.is_empty() {
+                    panic!("Cannot index into scalar variable");
+                }
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
+                let load_inst = func_data.dfg_mut().new_value().load(ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(load_inst).unwrap();
+                load_inst
+            }
 
-                        // 常量：直接生成整数IR
-                        func_data.dfg_mut().new_value().integer(value)
-                    }
-                    Some(SymbolInfo::Var(ptr)) | Some(SymbolInfo::GlobalVar(ptr)) => {
-                        let func_data = self.function_data_mut();
+            // region 数组访问
+            Some(SymbolInfo::LocalConstArray(ptr, _)) | 
+            Some(SymbolInfo::GlobalConstArray(ptr, _)) |
+            Some(SymbolInfo::LocalArray(ptr, _)) |
+            Some(SymbolInfo::GlobalArray(ptr, _)) => {
+                if lval.indices.is_empty() {
+                    panic!("Cannot load entire array '{}'", lval.ident);
+                }
+                
+                // 变量数组元素访问处理
+                let elem_ptr = self.generate_array_access_ptr(ptr, &lval.indices);
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
+                let load_inst = func_data.dfg_mut().new_value().load(elem_ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(load_inst).unwrap();
+                load_inst
+            }
 
-                        // (全局或局部)变量：生成 load 指令
-                        let load_inst = func_data.dfg_mut().new_value().load(ptr);
-                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(load_inst).unwrap();
-                        load_inst
-                    }
-                    None => {
-                        panic!("Identifier '{}' not found", lval.ident);
+            // 数组参数访问：使用 getptr 和 getelemptr 组合
+            Some(SymbolInfo::ParamArray(param_ptr, _)) => {
+                if lval.indices.is_empty() {
+                    panic!("Cannot load entire parameter array '{}'", lval.ident);
+                }
+
+                let param_type = self.function_data_mut().dfg().value(param_ptr).ty().clone();
+                println!("Debug: visiting param_type is {:?}", param_type);
+                
+                // 先计算所有索引
+                let indexes: Vec<Value> = lval.indices
+                    .iter()
+                    .map(|exp| self.generate_exp(&exp))
+                    .collect();
+                
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
+
+                // 解引用局部变量，得到真正的指针**i32 -> *i32
+                let loaded_ptr = func_data.dfg_mut().new_value().load(param_ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(loaded_ptr).unwrap();
+                
+                // 从参数指针开始逐层解开
+                let mut current_ptr = loaded_ptr;
+                
+                for (i, &index) in indexes.iter().enumerate() {
+                    let param_type = func_data.dfg().value(current_ptr).ty().clone();
+                    println!("Debug: i = {}, current_ptr_type = {}", i, param_type);
+                    if i == 0 {
+                        // 第一层：对指针类型使用 getptr
+                        // loaded_ptr 类型是 *[i32, 3], 使用 getptr 进行指针算术
+                        
+                        current_ptr = func_data.dfg_mut().new_value().get_ptr(current_ptr, index);
+                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
+                    } else {
+                        // 后续层：对数组类型使用 getelemptr
+                        current_ptr = func_data.dfg_mut().new_value().get_elem_ptr(current_ptr, index);
+                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
                     }
                 }
+                
+                // 最后加载目标值
+                let load_inst = func_data.dfg_mut().new_value().load(current_ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(load_inst).unwrap();
+                load_inst
+            }
+            // endregion 数组访问
+            None => panic!("Identifier '{}' not found", lval.ident),
+        }
+    }
+    
+    pub fn generate_lval_store(&mut self, lval: &LVal, value: Value) {
+        let symbol_info = self.function_irgen.scope_stack.lookup(&lval.ident).cloned();
+        
+        match symbol_info {
+            // 常量不可变
+            Some(SymbolInfo::Const(_)) |
+            Some(SymbolInfo::LocalConstArray(_, _)) | Some(SymbolInfo::GlobalConstArray(_, _)) => {
+                panic!("Cannot assign to constant '{}'", lval.ident);
+            }
+
+            // 普通变量赋值
+            Some(SymbolInfo::Var(ptr)) | Some(SymbolInfo::GlobalVar(ptr)) => {
+                if !lval.indices.is_empty() {
+                    panic!("Cannot index into scalar variable");
+                }
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
+                let store_inst = func_data.dfg_mut().new_value().store(value, ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
+            }
+            
+            // 变量数组赋值
+            Some(SymbolInfo::LocalArray(ptr, _dimensions)) | Some(SymbolInfo::GlobalArray(ptr, _dimensions)) => {
+                if lval.indices.is_empty() {
+                    panic!("Cannot assign to entire array '{}'", lval.ident);
+                }
+                // 数组元素赋值：计算元素地址并存储值
+                let elem_ptr = self.generate_array_access_ptr(ptr, &lval.indices);
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
+                let store_inst = func_data.dfg_mut().new_value().store(value, elem_ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
+            }
+
+            // TODO: 函数数组参数赋值
+            Some(SymbolInfo::ParamArray(param_ptr, _dimensions)) => {
+                if lval.indices.is_empty() {
+                    panic!("Cannot assign to entire parameter array '{}'", lval.ident);
+                }
+                // 和取值道理一样，先获取load指针，然后再解引用数组指针(getptr),最后使用getelemptr得到元素指针，再将要赋值的Value赋值给元素
+                let param_type = self.function_data_mut().dfg().value(param_ptr).ty().clone();
+                println!("Debug: giving val param_type is {:?}", param_type);
+
+                // 先计算所有索引
+                let indexes: Vec<Value> = lval.indices
+                    .iter()
+                    .map(|exp| self.generate_exp(&exp))
+                    .collect();
+
+                let current_bb = self.current_bb();
+                let func_data = self.function_data_mut();
+
+                // 解引用局部变量，得到真正的指针**i32 -> *i32
+                let loaded_ptr = func_data.dfg_mut().new_value().load(param_ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(loaded_ptr).unwrap();
+
+                // 从参数指针开始逐层解开
+                let mut current_ptr = loaded_ptr;
+
+                for (i, &index) in indexes.iter().enumerate() {
+                    let param_type = func_data.dfg().value(current_ptr).ty().clone();
+                    println!("Debug: i = {}, current_ptr_type = {}", i, param_type);
+                    if i == 0 {
+                        // 第一层：对指针类型使用 getptr
+                        // loaded_ptr 类型是 *[i32, 3], 使用 getptr 进行指针算术
+
+                        current_ptr = func_data.dfg_mut().new_value().get_ptr(current_ptr, index);
+                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
+                    } else {
+                        // 后续层：对数组类型使用 getelemptr
+                        current_ptr = func_data.dfg_mut().new_value().get_elem_ptr(current_ptr, index);
+                        func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(current_ptr).unwrap();
+                    }
+                }
+
+                // 最后赋值给目标值
+                let store_inst = func_data.dfg_mut().new_value().store(value, current_ptr);
+                func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(store_inst).unwrap();
+            }
+            None => {
+                panic!("Variable '{}' not found", lval.ident);
             }
         }
     }
+
+    fn generate_array_access_ptr(&mut self, base_ptr: Value, indices: &[Exp]) -> Value {
+        let mut ptr = base_ptr;
+
+        // 逐级处理每个索引
+        for index_expr in indices {
+            // 计算索引值
+            let index = self.generate_exp(index_expr);
+
+            // 使用 getelemptr 指令获取元素指针
+            let current_bb = self.current_bb();
+            let func_data = self.function_data_mut();
+            let gep_inst = func_data.dfg_mut().new_value().get_elem_ptr(ptr, index);
+            func_data.layout_mut().bb_mut(current_bb).insts_mut().push_key_back(gep_inst).unwrap();
+
+            ptr = gep_inst;
+        }
+
+        ptr
+    }
+
+
 }
