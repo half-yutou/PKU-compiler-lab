@@ -1,1 +1,0 @@
-mod koopa_ir_struct;

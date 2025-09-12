@@ -1,6 +1,6 @@
 use koopa::ir::Program;
 use lalrpop_util::lalrpop_mod;
-use pku_compiler::{lab7, lab8};
+use pku_compiler::{lab8};
 use std::env::args;
 use std::fs::read_to_string;
 use std::io::Result;
