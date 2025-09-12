@@ -90,7 +90,8 @@ impl LocalInitializer {
         // 处理初始化器元素
         for init in inits {
             if len >= lens.last().unwrap().1 {
-                return Err("Too many initializer elements".to_string());
+                // 如果初始化值超过数组大小，忽略多余的值（符合C语言标准）
+                break;
             }
             match init {
                 Self::List(list) => {

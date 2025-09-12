@@ -1,7 +1,19 @@
 use std::collections::HashMap;
-use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind, BasicBlock};
+use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind, BasicBlock, Type, TypeKind};
 use koopa::ir::dfg::DataFlowGraph;
 use koopa::ir::entities::ValueData;
+
+// 计算类型的大小（字节数）
+fn calculate_type_size(ty: &Type) -> usize {
+    match ty.kind() {
+        TypeKind::Int32 => 4,
+        TypeKind::Pointer(_) => 4, // 32位系统指针大小
+        TypeKind::Array(base, len) => {
+            calculate_type_size(base) * len
+        }
+        _ => 4, // 默认4字节
+    }
+}
 
 pub fn generate_riscv_assembly(program: Program) -> String {
     let mut asm = String::new();
@@ -72,12 +84,41 @@ fn generate_data_section(program: &Program) -> String {
                     data_asm.push_str(&format!("  .word {}\n", int_val.value()));
                 }
                 ValueKind::ZeroInit(_) => {
-                    // 零初始化 分配4个字节
-                    data_asm.push_str("  .zero 4\n");
+                    // 零初始化，根据类型计算大小
+                    let size = calculate_type_size(&init_data.ty());
+                    data_asm.push_str(&format!("  .zero {}\n", size));
+                }
+                ValueKind::Aggregate(_) => {
+                    // 聚合类型初始化（数组初始化）
+                    fn generate_aggregate_data(program: &Program, aggregate_value: Value, data_asm: &mut String) {
+                        let aggregate_data = program.borrow_value(aggregate_value);
+                        if let ValueKind::Aggregate(aggregate) = aggregate_data.kind() {
+                            for &elem in aggregate.elems() {
+                                let elem_data = program.borrow_value(elem);
+                                match elem_data.kind() {
+                                    ValueKind::Integer(int_val) => {
+                                        data_asm.push_str(&format!("  .word {}\n", int_val.value()));
+                                    }
+                                    ValueKind::ZeroInit(_) => {
+                                        data_asm.push_str("  .word 0\n");
+                                    }
+                                    ValueKind::Aggregate(_) => {
+                                        // 递归处理嵌套聚合类型
+                                        generate_aggregate_data(program, elem, data_asm);
+                                    }
+                                    _ => {
+                                        data_asm.push_str("  .word 0\n");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    generate_aggregate_data(program, init_value, &mut data_asm);
                 }
                 _ => {
-                    // 默认零初始化 分配4个字节
-                    data_asm.push_str("  .zero 4\n");
+                    // 默认零初始化，根据全局变量类型计算大小
+                    let size = calculate_type_size(&init_data.ty());
+                    data_asm.push_str(&format!("  .zero {}\n", size));
                 }
             }
         }
@@ -116,11 +157,25 @@ impl<'a> AsmGenerator<'a> {
 
         // 3. 生成函数序言(压栈)
         if self.stack_size > 0 {
-            asm.push_str(&format!("  addi  sp, sp, -{}\n", self.stack_size));
+            // 检查栈空间是否超出12位立即数范围
+            if self.stack_size <= 2047 {
+                asm.push_str(&format!("  addi  sp, sp, -{}\n", self.stack_size));
+            } else {
+                // 使用寄存器加载大立即数
+                asm.push_str(&format!("  li    t0, -{}\n", self.stack_size));
+                asm.push_str("  add   sp, sp, t0\n");
+            }
             
             // 如果不是叶子函数，保存ra寄存器
             if !self.is_leaf_function {
-                asm.push_str(&format!("  sw    ra, {}(sp)\n", self.stack_size - 4));
+                let ra_offset = self.stack_size - 4;
+                if ra_offset <= 2047 {
+                    asm.push_str(&format!("  sw    ra, {}(sp)\n", ra_offset));
+                } else {
+                    asm.push_str(&format!("  li    t0, {}\n", ra_offset));
+                    asm.push_str("  add   t0, sp, t0\n");
+                    asm.push_str("  sw    ra, 0(t0)\n");
+                }
             }
         }
 
@@ -195,10 +250,16 @@ impl<'a> AsmGenerator<'a> {
 
                 match value_data.kind() {
                     ValueKind::Alloc(_) => {
-                        // 变量分配
+                        // 变量分配，根据类型计算大小
                         let offset = self.stack_size;
                         self.value_stack_map.insert(inst_handle, offset);
-                        self.stack_size += 4;
+                        // 获取指针指向的类型大小
+                        if let TypeKind::Pointer(base_ty) = value_data.ty().kind() {
+                            let alloc_size = calculate_type_size(base_ty) as i32;
+                            self.stack_size += alloc_size;
+                        } else {
+                            self.stack_size += 4; // 默认大小
+                        }
                     },
                     ValueKind::Binary(_) => {
                         // 二元运算结果分配
@@ -310,7 +371,11 @@ impl<'a> AsmGenerator<'a> {
 
                 // 4. 将结果存储到栈
                 if let Some(&offset) = self.value_stack_map.get(&inst_handle) {
-                    asm.push_str(&format!("  sw    t2, {}(sp)\n", offset));
+                    if offset >= -2048 && offset <= 2047 {
+                        asm.push_str(&format!("  sw    t2, {}(sp)\n", offset));
+                    } else {
+                        asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    t2, 0(t6)\n", offset));
+                    }
                 } else {
                     panic!("Binary result not found in stack map: {:?}", inst_handle);
                 }
@@ -339,14 +404,45 @@ impl<'a> AsmGenerator<'a> {
                     let stack_args = &args[8..];
                     let stack_space = ((stack_args.len() * 4 + 15) / 16) * 16; // 16字节对齐
                     
-                    // 调整栈指针为栈参数分配空间
-                    asm.push_str(&format!("  addi  sp, sp, -{}\n", stack_space));
-                    
-                    // 从右到左压栈（最后一个参数先压栈）
-                    for (i, &arg) in stack_args.iter().enumerate().rev() {
+                    // 先将所有栈参数值存储到临时栈位置，避免寄存器冲突
+                    for (i, &arg) in stack_args.iter().enumerate() {
+                        // 加载参数值到t0寄存器
                         asm.push_str(&self.load_value_to_reg(arg, "t0", dfg));
-                        let offset = i * 4;
-                        asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                        
+                        // 存储到临时栈位置
+                        let temp_offset = self.stack_size + i as i32 * 4;
+                        if temp_offset <= 2047 {
+                            asm.push_str(&format!("  sw    t0, {}(sp)\n", temp_offset));
+                        } else {
+                            asm.push_str(&format!("  li    t1, {}\n  add   t1, sp, t1\n  sw    t0, 0(t1)\n", temp_offset));
+                        }
+                    }
+                    
+                    // 调整栈指针为栈参数分配空间
+                    if stack_space <= 2047 {
+                        asm.push_str(&format!("  addi  sp, sp, -{}\n", stack_space));
+                    } else {
+                        asm.push_str(&format!("  li    t0, -{}\n  add   sp, sp, t0\n", stack_space));
+                    }
+                    
+                    // 按顺序从临时栈位置加载并压栈（第9个参数在偏移0，第10个参数在偏移4，等等）
+                    for i in 0..stack_args.len() {
+                        let temp_offset = self.stack_size + i as i32 * 4 + stack_space as i32;
+                        let stack_offset = i * 4;
+                        
+                        // 从临时栈位置加载
+                        if temp_offset <= 2047 {
+                            asm.push_str(&format!("  lw    t0, {}(sp)\n", temp_offset));
+                        } else {
+                            asm.push_str(&format!("  li    t1, {}\n  add   t1, sp, t1\n  lw    t0, 0(t1)\n", temp_offset));
+                        }
+                        
+                        // 存储到栈参数位置
+                        if stack_offset <= 2047 {
+                            asm.push_str(&format!("  sw    t0, {}(sp)\n", stack_offset));
+                        } else {
+                            asm.push_str(&format!("  li    t1, {}\n  add   t1, sp, t1\n  sw    t0, 0(t1)\n", stack_offset));
+                        }
                     }
                 }
                 
@@ -357,13 +453,21 @@ impl<'a> AsmGenerator<'a> {
                 if args.len() > 8 {
                     let stack_args = &args[8..];
                     let stack_space = ((stack_args.len() * 4 + 15) / 16) * 16;
-                    asm.push_str(&format!("  addi  sp, sp, {}\n", stack_space));
+                    if stack_space <= 2047 {
+                        asm.push_str(&format!("  addi  sp, sp, {}\n", stack_space));
+                    } else {
+                        asm.push_str(&format!("  li    t6, {}\n  add   sp, sp, t6\n", stack_space));
+                    }
                 }
                 
                 // 如果函数有返回值，将a0的值保存到栈
                 if !matches!(value_data.ty().kind(), koopa::ir::TypeKind::Unit) {
                     if let Some(&offset) = self.value_stack_map.get(&inst_handle) {
-                        asm.push_str(&format!("  sw    a0, {}(sp)\n", offset));
+                        if offset >= -2048 && offset <= 2047 {
+                            asm.push_str(&format!("  sw    a0, {}(sp)\n", offset));
+                        } else {
+                            asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    a0, 0(t6)\n", offset));
+                        }
                     }
                 }
                 
@@ -379,12 +483,24 @@ impl<'a> AsmGenerator<'a> {
 
                 // 恢复ra寄存器（如果不是叶子函数）
                 if !self.is_leaf_function && self.stack_size > 0 {
-                    asm.push_str(&format!("  lw    ra, {}(sp)\n", self.stack_size - 4));
+                    let ra_offset = self.stack_size - 4;
+                    if ra_offset <= 2047 {
+                        asm.push_str(&format!("  lw    ra, {}(sp)\n", ra_offset));
+                    } else {
+                        asm.push_str(&format!("  li    t0, {}\n", ra_offset));
+                        asm.push_str("  add   t0, sp, t0\n");
+                        asm.push_str("  lw    ra, 0(t0)\n");
+                    }
                 }
 
                 // 恢复栈指针
                 if self.stack_size > 0 {
-                    asm.push_str(&format!("  addi  sp, sp, {}\n", self.stack_size));
+                    if self.stack_size <= 2047 {
+                        asm.push_str(&format!("  addi  sp, sp, {}\n", self.stack_size));
+                    } else {
+                        asm.push_str(&format!("  li    t0, {}\n", self.stack_size));
+                        asm.push_str("  add   sp, sp, t0\n");
+                    }
                 }
 
                 // 返回
@@ -414,7 +530,11 @@ impl<'a> AsmGenerator<'a> {
                 for (i, &arg) in jump.args().iter().enumerate() {
                     if let Some(&stack_offset) = self.bb_param_stack_map.get(&(jump.target(), i)) {
                         asm.push_str(&self.load_value_to_reg(arg, "t0", dfg));
-                        asm.push_str(&format!("  sw    t0, {}(sp)\n", stack_offset));
+                        if stack_offset >= -2048 && stack_offset <= 2047 {
+                            asm.push_str(&format!("  sw    t0, {}(sp)\n", stack_offset));
+                        } else {
+                            asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    t0, 0(t6)\n", stack_offset));
+                        }
                     }
                 }
                 
@@ -441,7 +561,11 @@ impl<'a> AsmGenerator<'a> {
                         ValueKind::Alloc(_) => {
                             // 目标是Alloc分配的栈地址，直接存储到栈偏移位置
                             if let Some(&offset) = self.value_stack_map.get(&store.dest()) {
-                                asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                                if offset >= -2048 && offset <= 2047 {
+                                    asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                                } else {
+                                    asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    t0, 0(t6)\n", offset));
+                                }
                             } else {
                                 panic!("Alloc destination not found in stack map: {:?}", store.dest());
                             }
@@ -487,7 +611,11 @@ impl<'a> AsmGenerator<'a> {
                         ValueKind::Alloc(_) => {
                             // 源是Alloc分配的栈地址，直接从栈加载
                             if let Some(&src_offset) = self.value_stack_map.get(&load.src()) {
-                                asm.push_str(&format!("  lw    t0, {}(sp)\n", src_offset));
+                                if src_offset >= -2048 && src_offset <= 2047 {
+                                    asm.push_str(&format!("  lw    t0, {}(sp)\n", src_offset));
+                                } else {
+                                    asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  lw    t0, 0(t6)\n", src_offset));
+                                }
                             } else {
                                 panic!("Alloc source not found in stack map: {:?}", load.src());
                             }
@@ -522,11 +650,85 @@ impl<'a> AsmGenerator<'a> {
 
                 // 将加载的值存储到栈上（Load指令的结果）
                 if let Some(&offset) = self.value_stack_map.get(&inst_handle) {
-                    asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                    if offset >= -2048 && offset <= 2047 {
+                        asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                    } else {
+                        asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    t0, 0(t6)\n", offset));
+                    }
                 } else {
                     panic!("Load result not found in stack map: {:?}", inst_handle);
                 }
 
+                asm
+            }
+            ValueKind::GetElemPtr(get_elem_ptr) => {
+                let mut asm = String::new();
+                
+                // 加载源地址到t1
+                asm.push_str(&self.load_value_to_reg(get_elem_ptr.src(), "t1", dfg));
+                
+                // 加载索引到t0
+                asm.push_str(&self.load_value_to_reg(get_elem_ptr.index(), "t0", dfg));
+                
+                // 计算元素大小
+                if let TypeKind::Pointer(base_ty) = value_data.ty().kind() {
+                    let elem_size = calculate_type_size(base_ty) as i32;
+                    if elem_size != 1 {
+                        // 索引乘以元素大小
+                        asm.push_str(&format!("  li    t2, {}\n", elem_size));
+                        asm.push_str("  mul   t0, t0, t2\n");
+                    }
+                }
+                
+                // 计算目标地址：base + index * elem_size
+                asm.push_str("  add   t0, t1, t0\n");
+                
+                // 将结果地址存储到栈
+                if let Some(&offset) = self.value_stack_map.get(&inst_handle) {
+                    if offset >= -2048 && offset <= 2047 {
+                        asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                    } else {
+                        asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    t0, 0(t6)\n", offset));
+                    }
+                } else {
+                    panic!("GetElemPtr result not found in stack map: {:?}", inst_handle);
+                }
+                
+                asm
+            }
+            ValueKind::GetPtr(get_ptr) => {
+                let mut asm = String::new();
+                
+                // 加载源地址到t1
+                asm.push_str(&self.load_value_to_reg(get_ptr.src(), "t1", dfg));
+                
+                // 加载索引到t0
+                asm.push_str(&self.load_value_to_reg(get_ptr.index(), "t0", dfg));
+                
+                // 计算元素大小（GetPtr通常用于数组元素访问）
+                if let TypeKind::Pointer(base_ty) = value_data.ty().kind() {
+                    let elem_size = calculate_type_size(base_ty) as i32;
+                    if elem_size != 1 {
+                        // 索引乘以元素大小
+                        asm.push_str(&format!("  li    t2, {}\n", elem_size));
+                        asm.push_str("  mul   t0, t0, t2\n");
+                    }
+                }
+                
+                // 计算目标地址：base + index * elem_size
+                asm.push_str("  add   t0, t1, t0\n");
+                
+                // 将结果地址存储到栈
+                if let Some(&offset) = self.value_stack_map.get(&inst_handle) {
+                    if offset >= -2048 && offset <= 2047 {
+                        asm.push_str(&format!("  sw    t0, {}(sp)\n", offset));
+                    } else {
+                        asm.push_str(&format!("  li    t6, {}\n  add   t6, sp, t6\n  sw    t0, 0(t6)\n", offset));
+                    }
+                } else {
+                    panic!("GetPtr result not found in stack map: {:?}", inst_handle);
+                }
+                
                 asm
             }
              _ => String::new(),
@@ -535,6 +737,26 @@ impl<'a> AsmGenerator<'a> {
 
     // 将值加载到指定寄存器的辅助方法
     fn load_value_to_reg(&self, value: Value, target_reg: &str, dfg: &DataFlowGraph) -> String {
+        // 首先检查是否为全局变量（不在函数 dfg 中）
+        if !dfg.values().contains_key(&value) {
+            let global_value_ref = self.program.borrow_value(value);
+            match global_value_ref.kind() {
+                ValueKind::GlobalAlloc(_) => {
+                    // 全局变量，加载其地址
+                    let var_name = global_value_ref.name()
+                        .as_ref()
+                        .unwrap()
+                        .strip_prefix('@')
+                        .unwrap();
+                    return format!("  la    {}, {}\n", target_reg, var_name);
+                },
+                _ => {
+                    panic!("Unsupported global value type: {:?}", global_value_ref.kind());
+                }
+            }
+        }
+        
+        // 处理函数内的值
         let value_data = dfg.value(value);
         match value_data.kind() {
             ValueKind::Integer(i) => {
@@ -553,13 +775,33 @@ impl<'a> AsmGenerator<'a> {
                     // 第9个及以后的参数从栈中获取
                     // 参数在调用者栈帧中，需要计算正确的偏移
                     let offset = self.stack_size + (arg_index as i32 - 8) * 4;
-                    format!("  lw    {}, {}(sp)\n", target_reg, offset)
+                    if offset >= -2048 && offset <= 2047 {
+                        format!("  lw    {}, {}(sp)\n", target_reg, offset)
+                    } else {
+                        format!("  li    t6, {}\n  add   t6, sp, t6\n  lw    {}, 0(t6)\n", offset, target_reg)
+                    }
+                }
+            },
+            ValueKind::Alloc(_) => {
+                // 对于alloc指令，返回栈地址（数组基地址）
+                if let Some(&offset) = self.value_stack_map.get(&value) {
+                    if offset >= -2048 && offset <= 2047 {
+                        format!("  addi  {}, sp, {}\n", target_reg, offset)
+                    } else {
+                        format!("  li    t6, {}\n  add   {}, sp, t6\n", offset, target_reg)
+                    }
+                } else {
+                    panic!("Alloc value not found in stack map: {:?}", value);
                 }
             },
             _ => {
                 // 从栈加载其他类型的值
                 if let Some(&offset) = self.value_stack_map.get(&value) {
-                    format!("  lw    {}, {}(sp)\n", target_reg, offset)
+                    if offset >= -2048 && offset <= 2047 {
+                        format!("  lw    {}, {}(sp)\n", target_reg, offset)
+                    } else {
+                        format!("  li    t6, {}\n  add   t6, sp, t6\n  lw    {}, 0(t6)\n", offset, target_reg)
+                    }
                 } else {
                     panic!("Value not found in stack map: {:?}", value);
                 }

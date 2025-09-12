@@ -482,7 +482,7 @@ impl IRGen {
 
                 for (i, &index) in indexes.iter().enumerate() {
                     let param_type = func_data.dfg().value(current_ptr).ty().clone();
-                    println!("Debug: loading: i = {}, current_ptr_type = {}", i, param_type);
+                    println!("Debug: loading: i = {}, current_ptr_type = {}, index_value = {:?}", i, param_type, func_data.dfg().value(index));
                     if i == 0 {
                         // 第一层：对指针类型使用 getptr
                         // loaded_ptr 类型是 *[i32, 3], 使用 getptr 进行指针算术

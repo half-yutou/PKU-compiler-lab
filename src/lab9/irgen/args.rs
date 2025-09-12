@@ -183,17 +183,16 @@ impl IRGen {
     // 辅助方法：尝试从表达式中提取 LVal - 修复生命周期问题
     fn try_extract_lval(&self, exp: &Exp) -> Option<LVal> {
         // 需要层层解析 Exp -> LOrExp -> LAndExp -> EqExp -> RelExp -> AddExp -> MulExp -> UnaryExp -> PrimaryExp -> LVal
-        if let Exp::LOr(lor_exp) = exp {
-            if let LOrExp::LAnd(land_exp) = lor_exp.as_ref() {
-                if let LAndExp::Eq(eq_exp) = land_exp.as_ref() {
-                    if let EqExp::Rel(rel_exp) = eq_exp.as_ref() {
-                        if let RelExp::Add(add_exp) = rel_exp.as_ref() {
-                            if let AddExp::Mul(mul_exp) = add_exp.as_ref() {
-                                if let MulExp::Unary(unary_exp) = mul_exp.as_ref() {
-                                    if let UnaryExp::Primary(primary_exp) = unary_exp.as_ref() {
-                                        if let PrimaryExp::LVal(lval) = primary_exp {
-                                            return Some(lval.clone());
-                                        }
+        let Exp::LOr(lor_exp) = exp;
+        if let LOrExp::LAnd(land_exp) = lor_exp.as_ref() {
+            if let LAndExp::Eq(eq_exp) = land_exp.as_ref() {
+                if let EqExp::Rel(rel_exp) = eq_exp.as_ref() {
+                    if let RelExp::Add(add_exp) = rel_exp.as_ref() {
+                        if let AddExp::Mul(mul_exp) = add_exp.as_ref() {
+                            if let MulExp::Unary(unary_exp) = mul_exp.as_ref() {
+                                if let UnaryExp::Primary(primary_exp) = unary_exp.as_ref() {
+                                    if let PrimaryExp::LVal(lval) = primary_exp {
+                                        return Some(lval.clone());
                                     }
                                 }
                             }

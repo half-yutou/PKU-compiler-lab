@@ -1,4 +1,4 @@
-use koopa::ir::Program;
+use koopa::ir::{Program, Type};
 use lalrpop_util::lalrpop_mod;
 use pku_compiler::{lab9};
 use std::env::args;
@@ -13,6 +13,7 @@ const MODE_KOOPA: &str = "-koopa";
 const MODE_RISCV: &str = "-riscv";
 
 fn main() -> Result<()> {
+    Type::set_ptr_size(4);
     // 解析命令行参数
     let mut args = args();
     args.next();
